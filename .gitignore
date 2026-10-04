@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+*.log
+.cache/
+telemetry/
+device_status_latest.json
+*.key
+*.pem
+.DS_Store

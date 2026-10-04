@@ -1,0 +1,42 @@
+name: Seizo Public CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  offline-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile core
+        run: |
+          python -m py_compile \
+            seizo_core/ai_plan.py \
+            seizo_core/auto_gate.py \
+            seizo_core/controller_inventory.py \
+            seizo_core/grbl_compat.py \
+            seizo_core/guarded_executor.py \
+            seizo_core/local_semantic_planner.py \
+            seizo_core/nano_servos.py \
+            seizo_core/skill.py \
+            seizo_core/virtual_seizo.py \
+            seizo_core/workspace_limits.py \
+            scripts/seizo_phone_control.py \
+            scripts/seizo_controller_inventory.py \
+            scripts/seizo_nano_readonly_probe.py \
+            scripts/seizo_record_replay_v21.py \
+            scripts/seizo_virtual_lab.py
+      - name: Offline unit tests
+        run: |
+          python -m unittest -q \
+            tests.test_auto_gate \
+            tests.test_controller_inventory \
+            tests.test_guarded_executor \
+            tests.test_local_semantic_planner \
+            tests.test_nano_servo_backend \
+            tests.test_phone_control \
+            tests.test_workspace_limits

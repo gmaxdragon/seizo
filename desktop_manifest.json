@@ -1,6 +1,6 @@
 {
   "schema": "seizo-desktop-manifest/v1",
-  "version": "2026.10.14-contact-v3",
+  "version": "2026.10.14-contact-v3.1",
   "base": {
     "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/6aba13c4b4e1990125cf5e766feaf65dc89e66e8/Seizo_Learn_Web.tar.xz",
     "sha256": "4d639563b67233f68733c57915f7c5aec4568b6a929cd3ff9e7e39112b04da28"
@@ -41,6 +41,14 @@
     "tests/test_collision_physics.py": {
       "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/seizo-desktop/patches/tests/test_collision_physics.py",
       "sha256": "1382aeb351810d8d6d0df07d294658d58341843f5502350286674b6b881ca22b"
+    },
+    "tests/test_startup_and_key_http.py": {
+      "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/seizo-desktop/patches/tests/test_startup_and_key_http.py",
+      "sha256": "8e3e2831a51062d1f29b7c4418c9e1747e8383a588c4643aa1bda9cc641181f6"
+    },
+    "tests/preserved_source_hashes.json": {
+      "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/seizo-desktop/patches/tests/preserved_source_hashes.json",
+      "sha256": "63198544ec93bd9df395202f5f942d87cd36182f31f9a076976bb830de93df67"
     }
   }
 }

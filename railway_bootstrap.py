@@ -10,7 +10,7 @@ import sys
 import tarfile
 import urllib.request
 
-BASE='https://raw.githubusercontent.com/gmaxdragon/seizo/seizo-railway-host/'
+BASE='https://raw.githubusercontent.com/gmaxdragon/seizo/3c0e769ccaab7e0d4735fa67533b14bf9ec8c159/'
 FILES={
     'Seizo_Learn_Web.tar.xz':'4d639563b67233f68733c57915f7c5aec4568b6a929cd3ff9e7e39112b04da28',
     'railway_host.py':'fcf9daea9882815bb1489ad88039bcb4a2205a40351b3b0bb1620c7a167800e9',
@@ -23,7 +23,7 @@ def download(file):
     with urllib.request.urlopen(BASE+file,timeout=60) as response:
         data=response.read(2_000_001)
     if len(data)>2_000_000 or hashlib.sha256(data).hexdigest()!=FILES[file]:
-        raise RuntimeError('Seizo deployment package did not match its expected checksum: '+file)
+        raise RuntimeError('Seizo archive checksum mismatch: '+file+' received='+hashlib.sha256(data).hexdigest()+' bytes='+str(len(data)))
     return data
 
 

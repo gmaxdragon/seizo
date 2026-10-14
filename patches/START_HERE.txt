@@ -1,0 +1,68 @@
+SEIZO LEARN - STARTUP + SAVED KEY UPDATE
+
+1. Close the old Seizo terminal and browser tab.
+2. Extract All into a NEW folder. Open the extracted Seizo_Learn folder.
+3. Double-click START.bat. Leave its terminal open.
+   It checks Python/NumPy and waits for the local server to respond before
+   opening the browser. Use that page, not an old browser bookmark.
+4. The Hack Club AI key section is directly on the main page.
+   Paste your key ONCE. It saves automatically after you finish pasting.
+   Wait for "Saved on this PC". Test key checks the provider separately.
+
+KEY VISIBILITY AND STORAGE
+New text is visible while you enter it. Hide key conceals it.
+After reopening, the saved key is loaded but concealed; click Show key to see it.
+Save / replace overwrites it. Delete saved key removes it from this PC.
+Deletion here does NOT revoke it on Hack Club's website.
+Do not paste your key into chat or publish screenshots while it is visible.
+
+On Windows the key is encrypted for your Windows user in:
+%LOCALAPPDATA%\Seizo\credentials\hackclub.dpapi
+It survives closing, restarting and extracting a compatible new Seizo version
+into another folder. Older downloads are unchanged. Future versions must keep
+this same storage contract. Nothing saves to browser localStorage or the ZIP.
+No admin access or new encryption package is needed.
+On non-Windows systems this build is session-only, never plaintext-on-disk.
+
+CONNECTION OR GRAPHICS ERRORS
+The app now distinguishes "Local app connected" from the separate API key test.
+An API key is NOT needed to start the server or train locally.
+If a port is occupied it uses a different free port and opens the right address.
+Double-clicking START.bat again reopens an already running copy of this build.
+A graphics failure no longer blocks key controls or local training.
+Use Reload 3D view after a graphics error. It does not delete a saved key or policy.
+If startup still fails, the terminal stays open; double-click OPEN_LOGS.bat and
+send the error from logs/startup.log, not your API key. Logs do not include keys.
+The precise cause of the earlier failure was not provided and is not assumed.
+Do not disable Windows security or run as Administrator as a workaround.
+
+LEARNING IS UNCHANGED
+Same detailed arm, five virtual inputs (including wrist and gripper), three
+objects and five tasks. No red tower. Same four large main buttons.
+The neural learner still starts untrained, unless you bring your saved policy.
+Hack Club Test key makes one small manual cloud request; it is NOT training.
+The default local budget is one million completed episodes, not movements.
+
+KEEP PREVIOUS LEARNING
+For the immediately preceding Seizo_Learn_From_Scratch version, copy its data
+folder into this new Seizo_Learn folder BEFORE launching. Do not copy .venv.
+The PPO/world/model files and network schema are unchanged. Older Q-table
+checkpoint.json.gz files are NOT compatible with this neural learner.
+Your API key is separate from training files and does not need to be copied.
+
+RUNTIME
+64-bit Python 3.10+ and NumPy are required. START.bat uses a working NumPy
+installation if present, otherwise creates/repairs .venv and installs NumPy.
+The first package install needs internet. Training does not need internet,
+Ollama, a GPU for neural updates, or cloud credits. The 3D view needs WebGL2.
+Keep your laptop awake and the terminal open during training.
+
+VALIDATION
+See evidence/VALIDATION.md for checks actually run and what remains untested.
+Native Windows DPAPI and your graphics driver were not executed in the Linux
+build environment. No real Hack Club key or robot was used in testing.
+
+
+AUTO-UPDATE: prefer the separate one-time Seizo Desktop Updater package.
+The updater refreshes code from GitHub on startup and preserves data locally.
+COLLISIONS V3: old v2 PPO models are archived for safety and start fresh.

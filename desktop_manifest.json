@@ -1,0 +1,46 @@
+{
+  "schema": "seizo-desktop-manifest/v1",
+  "version": "2026.10.14-contact-v3",
+  "base": {
+    "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/6aba13c4b4e1990125cf5e766feaf65dc89e66e8/Seizo_Learn_Web.tar.xz",
+    "sha256": "4d639563b67233f68733c57915f7c5aec4568b6a929cd3ff9e7e39112b04da28"
+  },
+  "patches": {
+    "core/world.py": {
+      "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/seizo-desktop/patches/core/world.py",
+      "sha256": "cfa984c3400b37d5e51abd10780c261cb7ffb83e965255d96aba3cac06aa00ed"
+    },
+    "core/contact.py": {
+      "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/seizo-desktop/patches/core/contact.py",
+      "sha256": "f610f9850671dd5c496d79dc81ff87030c0020202aa56e46418045ebdb463814"
+    },
+    "core/runner.py": {
+      "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/seizo-desktop/patches/core/runner.py",
+      "sha256": "aae4eabd7fb118b2f5b5295aa72ce1c5b622e7cade261cbc13d366389c1b3318"
+    },
+    "web/learning_view.js": {
+      "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/seizo-desktop/patches/web/learning_view.js",
+      "sha256": "8a6cebf50773d6ef5fe44cd8cd88616c69b39f983c93283f3678c781d4b0f0d7"
+    },
+    "web/app.js": {
+      "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/seizo-desktop/patches/web/app.js",
+      "sha256": "2084b48f9834bbbf0d7a002e00cd83befb3ea0c556a60fd2363ac4958b433099"
+    },
+    "app.py": {
+      "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/seizo-desktop/patches/app.py",
+      "sha256": "9bcc750dc17978ae6953a1afa49504c79a213d22f0b4f76979ef977bbb97b4ad"
+    },
+    "README.md": {
+      "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/seizo-desktop/patches/README.md",
+      "sha256": "44932da46ae8fc404f8a040954dae413199531760e7f0b410a1b1ab755e52a14"
+    },
+    "START_HERE.txt": {
+      "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/seizo-desktop/patches/START_HERE.txt",
+      "sha256": "9998c4c0e2f9fa3da4d96c1e221dc45a8cedcb4c85972c347865f166eae5aa0a"
+    },
+    "tests/test_collision_physics.py": {
+      "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/seizo-desktop/patches/tests/test_collision_physics.py",
+      "sha256": "1382aeb351810d8d6d0df07d294658d58341843f5502350286674b6b881ca22b"
+    }
+  }
+}

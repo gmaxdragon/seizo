@@ -13,7 +13,7 @@ import urllib.request
 BASE='https://raw.githubusercontent.com/gmaxdragon/seizo/seizo-railway-host/'
 FILES={
     'Seizo_Learn_Web.tar.xz':'4d639563b67233f68733c57915f7c5aec4568b6a929cd3ff9e7e39112b04da28',
-    'railway_host.py':'1c18a97ae0cab96b7d585d719df8dcf602424217c7cb128bf49cb6bba91a857f',
+    'railway_host.py':'fcf9daea9882815bb1489ad88039bcb4a2205a40351b3b0bb1620c7a167800e9',
 }
 ROOT=Path('/srv')
 ROOT.mkdir(exist_ok=True)

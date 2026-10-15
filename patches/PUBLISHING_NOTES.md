@@ -1,0 +1,1 @@
+Production integration uses the existing seizo-desktop manifest. The previous unpublished camera candidate is merged into the current launcher. Source is staged and validated before the stable manifest is changed. No new download is required by installed users.

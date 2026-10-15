@@ -13,6 +13,9 @@ export function createView(canvas,meshes,spec,gripperSpec,RendererClass=Renderer
  const G=setupGripper(R,gripperSpec);
  // Second end actuator: gripper servo. Wrist servo already exists in the source mesh.
  R.add({geometry:'roundbox',group:'wrist',local:compose(T(68,0,-15),S(22,12,23)),color:[.16,.19,.23],category:'tool',name:'Gripper MG90S servo - estimated mount',rough:.55});
+ for(const side of [-1,1]) R.add({geometry:'box',group:'wrist',
+   local:compose(T(50,0,side*17.5),S(20,26,7)),color:[.86,.86,.82],category:'tool',
+   name:side>0?'Rear upper tab - 7 mm thickness estimate':'Rear lower tab - 7 mm thickness estimate'});
  const bodies=[];for(let i=0;i<3;i++){let b={geometry:['roundbox','cylinder','sphere'][i],group:'object'+i,local:ident(),color:[[.76,.16,.14],[.18,.56,.27],[.15,.37,.82]][i],category:'object',rough:.65};R.add(b);bodies.push(b)}
  const pad={geometry:'roundbox',group:'pad',local:ident(),color:[.78,.80,.82],category:'workpad',rough:.85};R.add(pad);
  const target={geometry:'ring',group:'targetLearn',local:compose(S(18,18,2)),color:[.96,.58,.08],category:'task',rough:.6};R.add(target);
@@ -20,6 +23,9 @@ export function createView(canvas,meshes,spec,gripperSpec,RendererClass=Renderer
  function quaternionMatrix(q,p){let[w,x,y,z]=q;return new Float32Array([1-2*(y*y+z*z),2*(x*y+z*w),2*(x*z-y*w),0,2*(x*y-z*w),1-2*(x*x+z*z),2*(y*z+x*w),0,2*(x*z+y*w),2*(y*z-x*w),1-2*(x*x+y*y),0,...p,1]);}
  function show(f){
   frame=f;let p=f.pose;M.update(p,DEFAULT_DIMS,0);
+  if(f.base_height_offset_mm)for(const k of Object.keys(R.groups)){
+    if(!['object0','object1','object2','pad','targetLearn','orientGuide'].includes(k))R.groups[k][14]+=f.base_height_offset_mm;
+  }
   G.update(f,R.groups.wrist);
   for(let i=0;i<3;i++){let o=f.objects[i],r=o.radius;bodies[i].local=o.shape==='cylinder'?compose(T(0,0,-(o.half_height||13)),S(r,r,2*(o.half_height||13))):S(o.shape==='box'?2*r:r,o.shape==='box'?2*r:r,o.shape==='box'?2*r:r);R.groups['object'+i]=o.quaternion_wxyz?quaternionMatrix(o.quaternion_wxyz,o.position):T(...o.position);bodies[i].metal=o.pinched?.25:0;}
   R.groups.pad=T(390,0,f.floor_z-4);pad.local=S(310,350,8);

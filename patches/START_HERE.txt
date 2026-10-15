@@ -1,33 +1,39 @@
-SEIZO AXIAL ROLL AND LEARNING v6
+SEIZO: SIMULATED CAMERA LEARNING IN YOUR EXISTING UPDATER
+Release: 2026.10.14-camera-learning-v8.1
+Screen: seizo-camera-learning-v8.1
 
-Use your existing START_SEIZO.bat. No new folder is needed.
-STOP & save the current run, wait for saving, close its terminal, and reopen the
-same starter with internet. The page should show seizo-roll-learning-v6.
+NO NEW FOLDER OR SECOND APP.
+1. STOP & save your current run. Wait until saved and idle before closing its terminal.
+2. Reopen your usual START_SEIZO.bat with internet to fetch the update.
+3. The main page shows "AI input: simulated overhead + wrist cameras".
+4. Train / resume updates the local neural network from the two rendered RGB views.
+5. Watch policy and Test all tasks use the SAME camera-input network with frozen weights.
+6. In Camera placement and variation choose Fixed, Nearby, or Wider setups.
+   A setup stays fixed within an attempt and varies between attempts.
+7. STOP & save waits for the current bounded operation, writes the policy/optimizer/
+   counters/RNG, reload-verifies them, and then displays Saved and verified.
 
-1. Gripper check -> Tool roll 0 to 360 degrees -> Check gripper.
-   The whole hand rolls around the axis pointing toward its fingertips, not
-   left/right like a steering joint. Opening stays independent.
-2. Open / close with no object: no finger contact should be reported.
-3. Contact squeeze: the explicitly fixed diagnostic block resists closing.
-4. Hold free block + roll 90 degrees: a pre-positioned free block is held by
-   real simulated contacts, rolled, and released. This is a SCRIPTED MECHANISM
-   CHECK, not learned pickup or a demonstration used to train the network.
-5. Test all tasks: seven separate frozen-policy tests, paired with random actions
-   on fresh scenarios. Settings chooses 5, 20 or 100 trials per task. Stopping
-   cancels the test rather than calling a partial run a pass.
-6. Train / resume: Automatic lessons starts with reach and progresses after
-   held-out validation improves, reviewing older tasks along the way. Updates,
-   episodes and movement decisions are separate counters. Watch policy does not
-   update weights. Failed attempts remain failures.
-7. Optional: Ask AI about my test results sends one compact numeric evaluation
-   summary to Hack Club. The response can suggest a lesson; Use suggested lesson
-   only selects the task. You still press Train. No cloud fine-tuning occurs.
+The two inputs are fake cameras rendered by the simulator. No real Pi feeds, device
+camera permissions, Hack Club calls, or hidden joint/object coordinates are needed.
+The human's third-person 3D viewer is NOT a policy input. The simulator may use
+internal state for reward and a fixed rejection guard, never as neural observation.
+Both actor and critic use current/previous RGB plus known task instructions and the
+policy's own prior command. Fixed image averaging yields a compact CPU network.
+The fake cameras show simplified physics geometry, not photorealistic room video.
 
-The API counter reports actual manual requests, accepted responses and reported
-usage. LOCAL PPO TRAINING USES ZERO API CALLS. The API key and Windows DPAPI storage
-are unchanged. No key is included in this download, logs or GitHub.
+Your earlier state-based training is kept under the same protected data folder.
+New camera weights live in data/camera_pixels_v8. An old policy is NOT relabeled as
+camera-trained. Camera-policy progress is saved and resumed from that same path.
+Windows account-bound Hack Club key storage is unchanged. No credentials are in
+this release. No PEAC, Railway, Raspberry Pi or physical controller was modified.
 
-360-degree roll here is a SIMULATION setting based on your description. It is
-not confirmation of the physical motor's feedback, range, cable limits or servo
-protocol. No Pi, GPIO, serial, real-motor commands or Railway changes were added.
-Old v5 policies are archived byte-for-byte and cannot silently drive this v6 model.
+Default additional budget is 1,000 completed episodes, not a million tests. Nothing
+starts automatically. Practising Roll names a current lesson, not verified mastery.
+Only held-out evaluation results support improvement; an update count is not skill.
+Learning/testing can take longer than the old privileged-state simulator because
+images are rendered at every observation. No camera-policy mastery is claimed.
+
+If RGB rendering fails, training reports the error and is blocked; it never silently
+falls back to reading hidden simulator state. Hardware dimensions, camera placement,
+gripper tabs, forces and table clearance remain uncalibrated estimates. This cannot
+control the real arm, and virtual test success does not grant hardware authority.

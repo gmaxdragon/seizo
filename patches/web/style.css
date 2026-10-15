@@ -12,3 +12,11 @@
 @media(max-width:620px){.keyHeading{flex-wrap:wrap;gap:4px}.apiKeys{padding:10px}.keyActions>*{flex:1 1 40%}#keyToggle{padding:6px 9px}.keyInputRow{gap:5px}}
 
 .choose{flex-wrap:wrap;gap:10px}#learningEvidence{font-size:14px;color:#314958;padding-top:8px}#apiActivity{font-size:13px}#evaluation{overflow-x:auto}#taskInfo{max-width:calc(100% - 32px);white-space:normal}
+
+.cameraPair{display:flex;flex-wrap:wrap;gap:12px;margin:8px 0}
+.cameraPair figure{margin:0;flex:1;min-width:210px;max-width:420px}
+.cameraPair img{width:100%;aspect-ratio:4/3;object-fit:contain;background:#15191d}
+#cameraPanel{padding:14px;border:1px solid #666;border-radius:8px;margin:14px 0}
+#cameraPanel p{margin:6px 0;font-size:14px}
+#saveStatus{padding:9px;font-weight:600}
+#cameraPanel input[type=number]{width:90px}

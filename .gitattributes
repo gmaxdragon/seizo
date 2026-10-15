@@ -1,0 +1,4 @@
+patches/** text eol=lf
+scripts/assemble_roll_v6.py text eol=lf
+roll-v6-transfer/*.txt text eol=lf
+*.tar.xz -text

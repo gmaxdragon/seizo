@@ -1,42 +1,39 @@
-SEIZO: DETAILED CAMERA VIEWS AND EXPLORATION v9
-Release: 2026.10.15-views-exploration-v9
-Screen: seizo-detailed-views-v9
+SEIZO RUN CONTROLS v10
+Build: seizo-run-controls-v10
+Use your existing START_SEIZO.bat. No replacement folder, reset, or new API key.
+End the old run, wait for saving, close its terminal and reopen that same starter.
 
-Use the SAME START_SEIZO.bat. No new folder, app or API key.
-STOP & save, wait for verified saving and idle, close the terminal and reopen it.
+ETA
+The main page shows estimates for the selected training budget and full test.
+They come from completed runs measured on this PC, with an empirical planning
+range, not a promised completion time or an estimate of skill mastery. A first
+run says Calibrating until enough real samples exist. Training, policy tests,
+random baselines and injected-fault trials are counted separately. Render speed,
+view mix, curriculum changes and other running programs can change the estimate.
 
-Leave Training views on Automatic and Task on Automatic lessons. Train / resume
-starts a random-initialized PPO network. It samples its own bounded actions,
-receives task rewards and a small early bonus for new actual movement. Repeated
-poses receive no repeated bonus within an attempt. The discovery bonus is capped
-at +0.5 per attempt and fades to zero by episode 500. The task reward remains.
+END RUN & SAVE
+The button immediately requests cancellation and stops displayed playback.
+The current physics/render/update operation must finish safely, then saving is
+verified. This is not an OS process kill. The tab and server stay open. Existing
+weights, optimizer, RNG, remaining episode target and settings are preserved.
+Resume uses the remaining budget when episodes/task settings are unchanged.
+Changing the episode budget or task starts an additional run using existing
+weights; it does not erase learned parameters. The partial rollout is not a
+promise to restore the exact paused physical scene. Wait for Saved and verified.
 
-Initially the learner can see overhead, wrist, side and front RGB views. Some
-unassisted attempts are included early to avoid dependence on the extra views.
-Helper views become less frequent, then disappear, only after two successive
-held-out 20-trial checks with >=70% success and no invalid-physics trials. Time or
-update counters do not certify a skill. Failure leaves the phase unchanged.
+BACKGROUND
+Hide live previews to reduce browser rendering. Training still requires its two
+or four input-camera renders. The browser may be minimized or closed, but the
+Python terminal must remain open and the computer awake. No cloud work is
+started. The opt-in Windows keep-awake option applies only while plugged in and
+working. It lets the display turn off, never edits the power plan, releases after
+the run, and cannot override shutdown, manual sleep or lid policies.
 
-Test all tasks ALWAYS masks side and front views. It scores using wrist and
-overhead only, without updating weights or adding the discovery bonus. Camera
-focus buttons only enlarge a picture for you; they do not secretly change inputs.
-Watch policy uses the selected practice-view condition and does not update weights.
+CAMERAS
+Workspace framing makes objects larger in the overhead view. A configurable
+estimated wrist-lens height reduces obstruction by the housing. Full/wide
+framing remains available. These are estimated camera positions, not a measured
+match or photorealistic view of the real room. The neural input size and v9 policy
+ID are unchanged. Earlier results with different camera settings are stale.
 
-The four views render the detailed arm meshes with shadows and procedural
-floor/mat materials. Camera positions are estimates informed by the existing
-setup, not measured intrinsics or real Pi frames. The wrist camera remains
-selectable before the roll joint or on the rolling hand. The main third-person
-viewer is not another neural input. The actor and critic receive RGB, task
-instructions, prior requested actions and camera validity, not exact body poses.
-Views are 384x288, pooled to 48x36 per camera for the CPU network.
-
-Earlier state and v8 camera checkpoints are not deleted or renamed as trained
-for this new input space. New progress is in data/camera_views_v9; STOP & save
-also preserves the view curriculum and verifies reloading. Saved Windows keys
-are unchanged. Training/testing make zero cloud API calls. Nothing auto-starts.
-
-Two tool servos only: full simulated shaft roll and coupled jaw opening. Main
-arm physics, jaw contacts and table/penetration rejection remain in place. The
-higher-detail visual meshes are not calibrated physical collision geometry.
-No Pi, GPIO, serial, robot control, PEAC or Railway changes are included. Real
-hardware testing requires measured limits, camera calibration and local safeguards.
+No Pi, live camera, motor, PEAC or Railway change. Saved API-key storage unchanged.

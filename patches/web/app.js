@@ -6,7 +6,7 @@ let connected=false,graphicsReady=false,graphicsFailed=false,animationStarted=fa
 const TASKS=['reach','orient','push','lift','place','rotate','orient_place'];
 let suggestedLesson=null;
 async function api(path,body){
- if(body!==undefined&&['/api/start','/api/stop'].includes(path))body={...body,control_seq:++controlSeq};
+ if(body!==undefined&&['/api/start','/api/stop','/api/end-run'].includes(path))body={...body,control_seq:++controlSeq};
  const abort=new AbortController();
  const limit=path.includes('/hackclub/test')||path.includes('/hackclub/review')?40000:['/api/trial','/api/gripper-check'].includes(path)?180000:['/api/initial','/api/cameras/preview'].includes(path)?60000:15000;
  const timer=setTimeout(()=>abort.abort(),limit);
@@ -27,7 +27,7 @@ function task(){const s=$('task').value;return TASKS.includes(s)?s:s==='all'?TAS
 let cameraURLs={},lastCameraSerial=-1,focusedCamera=null;
 const CAMERA_NAMES=['overhead','wrist','side','front'];
 function cameraFrames(frame){
- const c=frame?.cameras;if(!c)return;
+ const c=frame?.cameras;if(!c||$('hidePreviews').checked)return;
  for(const [name,id] of CAMERA_NAMES.map(name=>[name,name+'Frame'])){
   if(!c[name])continue;
   if(cameraURLs[name])URL.revokeObjectURL(cameraURLs[name]);
@@ -41,7 +41,7 @@ function cameraFrames(frame){
  const p=c.settings||{};
  $('cameraState').textContent=`This attempt uses: ${(c.policy_camera_names||['overhead','wrist']).join(', ')}. Setup: ${p.profile||'unknown'}. Scored evaluation always masks both helper views. ${frame.safety_abort?'Trial aborted: '+frame.safety_abort+'.':''}`;
 }
-function controls(){const unavailable=!connected;const active=['training','stopping','evaluating','watching'].includes(status?.status);$('train').disabled=unavailable||active||busy;$('watch').disabled=unavailable||!graphicsReady||active||busy;$('evaluate').disabled=unavailable||active||busy;$('task').disabled=unavailable||active||busy;$('gripperCheck').disabled=unavailable||!graphicsReady||active||busy;$('reviewAI').disabled=unavailable||active||busy;$('viewMode').disabled=unavailable||active||busy;$('saveViews').disabled=unavailable||active||busy;}
+function controls(){const unavailable=!connected;const active=['training','stopping','evaluating','watching'].includes(status?.status)||['requested','saving'].includes(status?.end_run?.state);$('train').disabled=unavailable||active||busy;$('watch').disabled=unavailable||!graphicsReady||active||busy;$('evaluate').disabled=unavailable||active||busy;$('task').disabled=unavailable||active||busy;$('gripperCheck').disabled=unavailable||!graphicsReady||active||busy;$('reviewAI').disabled=unavailable||active||busy;$('viewMode').disabled=unavailable||active||busy;$('saveViews').disabled=unavailable||active||busy;}
 function show(f){
  latestFrame=f;cameraFrames(f);if(f.diagnostic)$('cameraState').textContent='Scripted mechanism check: camera learning is inactive. The images above retain the last policy observation.';if(!view||!graphicsReady)return;view.show(f);
  const selected=f.objects[f.selected_object],roll=((f.pose.wrist%360)+360)%360;
@@ -54,7 +54,7 @@ function show(f){
 function begin(trace,label){play={trace,index:0,at:0,label,generation:epoch};show(trace.frames[0]);$('overlay').textContent=label;}
 function frame(t){
  try {
- if(graphicsFailed)return;
+ if(graphicsFailed||$('hidePreviews').checked||document.hidden){lastFrame=t;return;}
  const dt=lastFrame?Math.min(200,t-lastFrame):0;lastFrame=t;
  if(play&&play.generation===epoch){
   play.at+=dt;const ms=+$('speed').value;
@@ -70,16 +70,16 @@ function frame(t){
  finally{requestAnimationFrame(frame);}
 }
 $('train').onclick=async()=>{busy=true;controls();epoch++;play=null;try{say('Starting local neural training...');await api('/api/start',{episodes:+$('episodes').value,task:$('task').value,compute:$('compute').value,fault_probability:0});lastId=0;await poll();}catch(e){fail(e)}finally{busy=false;controls()}};
-$('stop').onclick=async()=>{epoch++;play=null;say('Displayed movement stopped. Saving policy...');try{await api('/api/stop',{});await poll();}catch(e){fail(e)}};
+$('stop').onclick=async()=>{epoch++;play=null;say('Run cancellation requested. Saving at the next safe boundary. This tab stays open.');try{await api('/api/end-run',{settings:sessionSettings()});await poll();}catch(e){fail(e)}};
 $('watch').onclick=async()=>{busy=true;controls();const id=++epoch;play=null;say('Running a frozen virtual-policy trial...');try{const tr=await api('/api/trial',{task:task(),source:$('source').value,fault:$('fault').checked});if(id!==epoch)return;begin(tr,tr.policy_updates?'Updated policy, skill not guaranteed':'Untrained neural policy: random exploration');say(tr.policy_updates?'Testing updated policy weights. Improvement is not guaranteed. No learning during this test.':'Watching the untrained policy. It has not learned yet.');}catch(e){fail(e)}finally{busy=false;controls()}};
 $('evaluate').onclick=async()=>{epoch++;play=null;try{say('Testing ALL seven tasks and paired random baselines. No cloud calls or weight updates.');await api('/api/evaluate',{task:'all',trials:+$('evalTrials').value});await poll()}catch(e){fail(e)}};
 let polling=false;
-async function poll(){if(polling||closed)return;polling=true;try{status=await api('/api/status');connected=true;$('connection').textContent='Local app connected · '+location.host;$('connection').className='online';let s=status;if(!play&&s.live_camera&&s.live_camera.serial!==lastCameraSerial){lastCameraSerial=s.live_camera.serial;cameraFrames(s.live_camera);}const nf=n=>Number(n).toLocaleString();$('physicsBadge').textContent=s.build+' · '+s.physics;$('progress').textContent=`${nf(s.episodes)} / ${nf(s.target_episodes)} completed episodes · ${nf(s.moves)} movements · ${nf(s.updates)} network updates`;$('saveStatus').textContent=s.save_verified&&s.saved_fingerprint===s.policy_fingerprint?
+async function poll(){if(polling||closed)return;polling=true;try{status=await api('/api/status');restoreSettings(status);showTiming(status);connected=true;$('connection').textContent='Local app connected · '+location.host;$('connection').className='online';let s=status;if(!play&&s.live_camera&&s.live_camera.serial!==lastCameraSerial){lastCameraSerial=s.live_camera.serial;cameraFrames(s.live_camera);}const nf=n=>Number(n).toLocaleString();$('physicsBadge').textContent=s.build+' · '+s.physics;$('progress').textContent=`${nf(s.episodes)} / ${nf(s.target_episodes)} completed episodes · ${nf(s.moves)} movements · ${nf(s.updates)} network updates`;$('saveStatus').textContent=s.save_verified&&s.saved_fingerprint===s.policy_fingerprint?
   `Saved and verified by reload: ${new Date(s.last_saved*1000).toLocaleTimeString()} · policy ${s.saved_fingerprint.slice(0,10)}. Safe to close after the run is idle.`:
   (s.status==='stopping'?'Not finished saving yet. Keep the terminal open.':'Current changes are not yet checkpointed. STOP & save before closing.');
  $('bar').max=s.target_episodes;$('bar').value=s.episodes;
  if(s.view_curriculum){const v=s.view_curriculum;$('viewStage').textContent=`${v.label}. ${v.mode==='auto'?'Automatic view curriculum.':'Manual practice-view setting.'} Tests: wrist + overhead only. No skill is certified by the stage name.`;if(document.activeElement!==$('viewMode'))$('viewMode').value=v.mode;const m=s.motion_feedback;$('discoveryFeedback').textContent=`Early exploration bonus: fades to zero by episode 500. ${m?`Last sampled new-cell bonus ${Number(m.discovery_bonus||0).toFixed(3)}; task reward ${Number(m.task_reward||0).toFixed(3)}.`:''} Only new actual movement earns the capped bonus.`;}
- if(s.status==='training'){say(`Practising ${s.lesson}. This is the current lesson, not a pass. ${s.episodes<1?'Exploring before the first completed episode.':''}`);let tr=s.trace;if(graphicsReady&&!play&&tr&&tr.id!==lastId){lastId=tr.id;begin(tr,`Training exploration from episode ${nf(tr.episode)}`);}let eta=s.estimated_seconds_remaining;$('outcome').textContent=`Showing a sampled trial, not every background movement. ${eta?`At the measured rate, remaining budget is about ${Math.ceil(eta/3600)} hours (rough estimate).`:''}`;}
+ if(s.status==='training'){say(`Practising ${s.lesson}. This is the current lesson, not a pass. ${s.episodes<1?'Exploring before the first completed episode.':''}`);let tr=s.trace;if(graphicsReady&&!$('hidePreviews').checked&&!play&&tr&&tr.id!==lastId){lastId=tr.id;begin(tr,`Training exploration from episode ${nf(tr.episode)}`);}$('outcome').textContent='Showing a sampled trial, not every background movement. The time estimate above uses measured wall-clock speed.';}
  else if(s.status==='stopping')say('Stop requested. Waiting for the current operation to stop and the checkpoint to verify...');
  else if(s.status==='evaluating')say(`Frozen evaluation: ${s.evaluation_progress?.phase||'starting'} · ${s.evaluation_progress?.completed||0}/${s.evaluation_progress?.total||7} tasks. No learning or API calls.`);
  else if(s.status==='watching')say('Computing a camera-only policy test. STOP cancels it.');
@@ -148,7 +148,7 @@ async function init(){
  await poll();
  setInterval(poll,1500);
  window.__seizo={get view(){return view},get state(){return status},get playback(){return play}};
- if(status?.config){$('episodes').value=status.config.episodes;$('task').value=status.config.task;$('compute').value=status.config.compute;}
+ if(status?.config&&!restoredSession){$('episodes').value=status.config.episodes;$('task').value=status.config.task;$('compute').value=status.config.compute;}
  try{
   const fetchJSON=async path=>{const r=await fetch(path,{cache:'no-store'});if(!r.ok)throw Error('Missing '+path+'; extract the whole download folder.');return r.json();};
   const [module,meshes,spec,gripperSpec]=await Promise.all([import('./learning_view.js'),fetchJSON('/assets/meshes.json'),fetchJSON('/assets/kinematics.json'),fetchJSON('/assets/gripper.json')]);
@@ -162,7 +162,8 @@ init();
 $('applyCameras').onclick=async()=>{
  try{
  const value={profile:$('cameraProfile').value,overhead_height_m:Number($('cameraHeight').value)/100,
-   overhead_side_m:Number($('cameraSide').value)/100,wrist_mount:$('cameraMount').value,frame_faults:$('cameraFaults').checked};
+   overhead_side_m:Number($('cameraSide').value)/100,wrist_mount:$('cameraMount').value,frame_faults:$('cameraFaults').checked,
+   framing:$('cameraFraming').value,wrist_height_m:Number($('wristLensHeight').value)/100};
  await api('/api/cameras/config',value);
  const frame=await api('/api/cameras/preview',{});show(frame);say('Camera setup saved. This preview is not a learned trial.');
  await poll();
@@ -180,3 +181,66 @@ $('saveViews').onclick=async()=>{try{
  await api('/api/views/config',{mode:$('viewMode').value});
  show(await api('/api/cameras/preview',{}));await poll();say('Practice views saved. All scored tests still use only wrist and overhead.');
  }catch(e){fail(e)}};
+
+// Session controls preserve the same v9 policy; no reset or remote job is implied.
+let restoredSession=false, estimateTimer=null, settingsTimer=null, lastEstimateAt=0;
+function sessionSettings(){return {speed:+$('speed').value,eval_trials:+$('evalTrials').value,
+ source:$('source').value,watch_fault:$('fault').checked,hide_previews:$('hidePreviews').checked,
+ keep_awake:$('keepAwake').checked,task:$('task').value,episodes:+$('episodes').value,compute:$('compute').value};}
+function restoreSettings(s){
+ if(restoredSession||!s.session_settings)return;restoredSession=true;
+ const u=s.session_settings;
+ const c=s.camera_config||{};
+ $('cameraProfile').value=c.profile||'nearby';$('cameraHeight').value=(c.overhead_height_m??.65)*100;
+ $('cameraSide').value=(c.overhead_side_m??-.10)*100;$('cameraMount').value=c.wrist_mount||'before_roll';
+ $('cameraFaults').checked=!!c.frame_faults;$('cameraFraming').value=c.framing||'workspace';
+ $('wristLensHeight').value=(c.wrist_height_m??.075)*100;
+ for(const [id,key] of [['speed','speed'],['evalTrials','eval_trials'],['source','source'],['task','task'],['episodes','episodes'],['compute','compute']])$(id).value=u[key];
+ for(const [id,key] of [['fault','watch_fault'],['hidePreviews','hide_previews'],['keepAwake','keep_awake']])$(id).checked=!!u[key];
+ applyPreviewVisibility();scheduleEstimates();
+}
+function duration(seconds){
+ const m=Math.max(1,Math.round(seconds/60));
+ if(m<60)return `${m} min`;
+ return `${Math.floor(m/60)} h ${m%60} min`;
+}
+function estimateText(e){
+ if(!e||e.seconds===null)return 'Calibrating from real completed trials on this computer. No reliable estimate yet.';
+ if(e.state==='complete')return 'Selected work complete; any final save still has to finish.';
+ return `about ${duration(e.seconds)} (${duration(e.range_seconds[0])}–${duration(e.range_seconds[1])}). ${e.state==='measured'?'Measured recent speed.':'Provisional estimate; limited or related-task samples.'}`;
+}
+function showTiming(s){
+ $('etaLive').textContent=s.eta?`Remaining ${s.eta.kind==='test'?'test':'training'} time: ${estimateText(s.eta)} Completed ${s.eta.completed_trials}/${s.eta.total_trials} measured units.`:'Time remaining: not running. This estimates work duration, not when a skill will be learned.';
+ $('powerStatus').textContent=s.background?.power_request||'';
+ if(s.end_run?.state==='requested'||s.end_run?.state==='saving')$('etaLive').textContent=s.end_run.message+' Do not close the terminal until saving verifies.';
+ if(s.end_run?.state==='saved')$('etaLive').textContent=s.end_run.message;
+ if(s.end_run?.state==='error')$('etaLive').textContent=s.end_run.message;
+ if(Date.now()-lastEstimateAt>30000)scheduleEstimates();
+}
+function scheduleEstimates(){clearTimeout(estimateTimer);estimateTimer=setTimeout(refreshEstimates,450);}
+async function refreshEstimates(){
+ if(!connected)return;lastEstimateAt=Date.now();
+ const settings={episodes:+$('episodes').value,task:$('task').value,trials:+$('evalTrials').value,compute:$('compute').value};
+ if(!Number.isInteger(settings.episodes)||settings.episodes<1||settings.episodes>1000000)return;
+ try{
+  const [train,test]=await Promise.all([api('/api/estimate',{...settings,kind:'train'}),api('/api/estimate',{...settings,kind:'test'})]);
+  $('etaTrain').textContent=`Selected training budget: ${estimateText(train)}`;
+  $('etaTest').textContent=`Selected full test (${test.remaining_trials} policy + baseline + fault trials): ${estimateText(test)}`;
+ }catch(e){$('etaTrain').textContent='Estimate unavailable: '+e.message;}
+}
+function saveSessionSoon(){
+ clearTimeout(settingsTimer);settingsTimer=setTimeout(async()=>{
+  if(!connected)return;
+  try{await api('/api/session-settings',{settings:sessionSettings()});}
+  catch(e){$('powerStatus').textContent='Settings were not saved: '+e.message;}
+ },400);
+}
+function applyPreviewVisibility(){
+ const hidden=$('hidePreviews').checked;
+ $('cameraPanel').hidden=hidden;document.querySelector('.viewport').hidden=hidden;
+ if(hidden){epoch++;play=null;}else{lastCameraSerial=-1;if(latestFrame)show(latestFrame);}
+}
+for(const id of ['episodes','compute','evalTrials','task','speed','source','fault'])$(id).addEventListener('change',()=>{scheduleEstimates();saveSessionSoon();});
+$('hidePreviews').onchange=()=>{applyPreviewVisibility();saveSessionSoon();};
+$('keepAwake').onchange=saveSessionSoon;
+$('settingsClose').addEventListener('click',()=>{scheduleEstimates();saveSessionSoon();});

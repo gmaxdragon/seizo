@@ -13,7 +13,7 @@ from core.runner import Runner,World
 from core.cloud import HackClubPlanner
 
 ROOT=Path(__file__).resolve().parent
-BUILD='seizo-detailed-views-v9';PORT=8772
+BUILD='seizo-run-controls-v10';PORT=8772
 
 class DataLock:
     def __init__(self,path):
@@ -100,15 +100,21 @@ def make_handler(runner,token,quit_event,cloud,instance_id='test-instance'):
                     raise ValueError('MuJoCo is unavailable. Close Seizo and reopen START_SEIZO.bat to repair dependencies. Training is blocked instead of using the old contact model.')
                 def keys(allowed):
                     if set(data)-set(allowed):raise ValueError('Unknown setting.')
-                if path in ('/api/start','/api/stop'):
+                if path in ('/api/start','/api/stop','/api/end-run'):
                     seq=data.pop('control_seq',None)
                     if type(seq)is not int or not 0<=seq<2**53:raise ValueError('Invalid command sequence. Refresh the page.')
                     with command_lock:
                         if seq<=command_state['seq']:raise ValueError('A newer command or STOP replaced this request.')
                         command_state['seq']=seq
                         if path=='/api/start':result=runner.start(data)
+                        elif path=='/api/end-run':
+                            keys(('settings',));result=runner.end_run(data.get('settings'))
                         else:
                             keys(());result=runner.stop()
+                elif path=='/api/estimate':
+                    keys(('kind','episodes','task','trials','compute'));result=runner.estimate_run(**data)
+                elif path=='/api/session-settings':
+                    keys(('settings',));result=runner.set_session(data.get('settings',{}))
                 elif path=='/api/trial':
                     keys(('task','source','fault','seed'))
                     if type(data.get('fault',False))is not bool:raise ValueError('Invalid fault setting.')
@@ -125,7 +131,7 @@ def make_handler(runner,token,quit_event,cloud,instance_id='test-instance'):
                 elif path=='/api/views/config':
                     keys(('mode',));result=runner.set_views(data.get('mode','auto'))
                 elif path=='/api/cameras/config':
-                    keys(('profile','overhead_height_m','overhead_side_m','wrist_mount','frame_faults'))
+                    keys(('profile','overhead_height_m','overhead_side_m','wrist_mount','frame_faults','framing','wrist_height_m'))
                     result=runner.set_cameras(data)
                 elif path=='/api/cameras/preview':
                     keys(());result=runner.camera_preview(resample=True)
@@ -159,8 +165,8 @@ def make_handler(runner,token,quit_event,cloud,instance_id='test-instance'):
 
 def default_runner(data_dir):
     """Production uses ONLY fake-camera observations; no opt-in or truth fallback."""
-    from core.view_runner import ViewRunner
-    return ViewRunner(Path(data_dir)/'camera_views_v9')
+    from core.session_runner import SessionRunner
+    return SessionRunner(Path(data_dir)/'camera_views_v9')
 
 
 def main():

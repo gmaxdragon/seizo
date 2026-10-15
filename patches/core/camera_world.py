@@ -16,13 +16,14 @@ from .camera_observation import WIDTH,HEIGHT,OBS_SIZE,POLICY_ID,CONTRACT,encode,
 
 PROFILES=('fixed','nearby','varied')
 DEFAULT_CONFIG={'profile':'nearby','overhead_height_m':.65,'overhead_side_m':-.10,
-                'wrist_mount':'before_roll','frame_faults':False}
-CONFIG_LIMITS={'overhead_height_m':(.45,1.4),'overhead_side_m':(-.6,.6)}
+                'wrist_mount':'before_roll','frame_faults':False,'framing':'workspace','wrist_height_m':.075}
+CONFIG_LIMITS={'overhead_height_m':(.45,1.4),'overhead_side_m':(-.6,.6),'wrist_height_m':(.045,.11)}
 def validate_config(value=None):
     c=dict(DEFAULT_CONFIG)
     if value:
         if not isinstance(value,dict) or set(value)-set(c):raise ValueError('Unknown camera setting')
         c.update(value)
+    if c['framing'] not in ('workspace','full'):raise ValueError('Unknown camera framing')
     if c['profile'] not in PROFILES:raise ValueError('Unknown camera-variation profile')
     if c['wrist_mount'] not in ('before_roll','with_roll'):raise ValueError('Unknown wrist-camera mount')
     if type(c['frame_faults']) is not bool:raise ValueError('Frame faults must be on/off')

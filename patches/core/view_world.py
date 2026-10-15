@@ -55,9 +55,14 @@ class ViewWorld(CameraWorld):
                           self.camera_config['overhead_side_m'],
                           self.camera_config['overhead_height_m']+self.floor_heights[i]/1000.]
         s['overhead_target']=[.27,0,.12];s['overhead_fovy']=55+float(r.uniform(-3,3))*scale
-        s['wrist_local_pos']=(np.array([.034,0,.045])+r.uniform(-1,1,3)*.003*scale).tolist()
+        s['wrist_local_pos']=(np.array([.034,0,self.camera_config['wrist_height_m']])+r.uniform(-1,1,3)*.003*scale).tolist()
         s['wrist_local_target']=(np.array([.173,0,-.045])+r.uniform(-1,1,3)*.006*scale).tolist()
         s['wrist_fovy']=77+float(r.uniform(-4,4))*scale
+        if self.camera_config['framing']=='workspace':
+            s['overhead_target']=[.36,0,.065];s['overhead_fovy']=46+float(r.uniform(-2,2))*scale
+            s['wrist_local_target']=[.210,0,-.045];s['wrist_fovy']=68+float(r.uniform(-2,2))*scale
+        s['framing']=self.camera_config['framing']
+        s['lens_height_is_measured']=False
         s['side_pos']=[.32,-.65,.42];s['front_pos']=[.78,.15,.38]
         s['helper_target']=[.27,0,.16];s['helper_fovy']=58.
         s['brightness']=1+float(r.uniform(-.07,.07))*scale;s['noise_std']=.7*scale

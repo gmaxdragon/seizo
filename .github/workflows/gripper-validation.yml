@@ -1,0 +1,22 @@
+name: Gripper validation dependencies
+on:
+  push:
+    branches: [seizo-gripper-fix]
+    paths: [.github/workflows/gripper-validation.yml]
+permissions:
+  contents: read
+jobs:
+  test-dependencies:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Download wheels for isolated physics validation
+        run: python -m pip download --only-binary=:all: --dest wheels 'mujoco==3.3.7' 'numpy<3'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gripper-validation-wheels
+          path: wheels/
+          retention-days: 1

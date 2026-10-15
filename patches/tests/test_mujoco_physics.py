@@ -96,7 +96,7 @@ class TestMuJoCoDynamics(unittest.TestCase):
 
     def test_not_learning_when_just_watching(self):
         w=MuJoCoWorld(n=2,task='all',seed=6)
-        assert w.observation().shape==(2,49)
+        assert w.observation().shape==(2,__import__('core.world',fromlist=['OBS_SIZE']).OBS_SIZE)
         before=w.count.copy()
         for _ in range(4):
             obs,reward,term,trunc,info=w.step(np.zeros((2,5)))

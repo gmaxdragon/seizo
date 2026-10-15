@@ -10,10 +10,10 @@ Keep SEIZO_PHYSICAL_MOTION disabled: no Pi, serial, GPIO, or motor imports.
 from __future__ import annotations
 from xml.etree import ElementTree as ET
 
-MODEL_VERSION='seizo-two-servo-parallel-contact-v5'
+MODEL_VERSION='seizo-axial-roll-contact-curriculum-v6'
 DT=0.001
 SUBSTEPS=60
-JOINT_NAMES=('base_yaw','shoulder_pitch','elbow_relative','wrist_yaw','left_finger','right_finger','left_parallel','right_parallel','wrist_level')
+JOINT_NAMES=('base_yaw','shoulder_pitch','elbow_relative','wrist_roll','left_finger','right_finger','left_parallel','right_parallel','wrist_level')
 ACTUATOR_NAMES=('motor_base','motor_shoulder','motor_elbow','motor_wrist','motor_gripper')
 OBJECT_NAMES=('red_cube','green_cylinder','blue_ball')
 OBJECT_GEOMS=('object_red','object_green','object_blue')
@@ -29,7 +29,7 @@ def xml_model():
     """Make linked jaws from the actual displayed mesh; keep only FIVE actuators.
 
     Internal follower joints are constrained mechanical links, not extra servos.
-    The shaft axis is retained from the existing model and remains uncalibrated.
+    The shaft axis follows the user-described longitudinal roll; dimensions remain uncalibrated.
     """
     from .gripper_geometry import SPEC, MAX_ANGLE
     root=ET.fromstring(_legacy_xml())
@@ -42,10 +42,14 @@ def xml_model():
     ET.SubElement(level,'joint',name='wrist_level',type='hinge',axis='0 -1 0',range='-2.9 2.9',damping='0.03',armature='0.00005')
     ET.SubElement(level,'inertial',pos='0 0 0',mass='0.025',diaginertia='0.000006 0.000006 0.000006')
     wrist.set('pos','0 0 0');level.append(wrist)
-    joint=wrist.find("joint[@name='wrist_yaw']")
+    joint=wrist.find("joint[@name='wrist_yaw']");joint.set('name','wrist_roll')
+    joint.set('limited','false');joint.attrib.pop('range',None)
+    motor=root.find("actuator/position[@name='motor_wrist']")
+    motor.set('joint','wrist_roll');motor.set('ctrllimited','false');motor.attrib.pop('ctrlrange',None)
+    motor.set('kv','.06')
     joint.set('axis',' '.join(str(v) for v in SPEC['wrist_axis']))
     joint.set('pos',' '.join(str(v*.001) for v in SPEC['wrist_pivot']))
-    wrist.find("site[@name='tool_tip']").set('pos','0.173 0 0.001')
+    wrist.find("site[@name='tool_tip']").set('pos','0.173 0 0')
     # The hand is hollow. Convex pieces partition its contour, not its whole hull.
     asset=ET.SubElement(root,'asset')
     contact=root.find('contact');contact.clear()
@@ -80,6 +84,8 @@ def xml_model():
     ET.SubElement(eq,'joint',name='mirrored_gripper_jaws',joint1='left_finger',joint2='right_finger',polycoef='0 1 0 0 0',solref='.003 1',solimp='.995 .999 .0001')
     actuator=root.find("actuator/position[@name='motor_gripper']")
     actuator.set('ctrlrange',f'0 {MAX_ANGLE}');actuator.set('kp','0.8');actuator.set('kv','.014');actuator.set('forcerange','-.06 .06')
+    bottle=root.find(".//geom[@name='object_green']")
+    bottle.set('size','.012 .030');bottle.set('density','850')
     # No exclusion between the two opposing jaws. The solver must resist contact.
     return ET.tostring(root,encoding='unicode')
 

@@ -14,21 +14,21 @@ from .contact import colliders, solve_capsule_contacts, FINGER_RADIUS
 
 SPEC=json.loads((Path(__file__).resolve().parents[1]/'web/assets/kinematics.json').read_text())
 D=SPEC['dimensions']; MODEL_ID='seizo-five-control-capsule-v3'
-TASKS=('reach','orient','push','lift','place')
-TASK_LABELS=('Reach an object','Aim wrist + set gripper','Push to the pad','Grip and lift','Lift and place')
+TASKS=('reach','orient','push','lift','place','rotate','orient_place')
+TASK_LABELS=('Reach','Roll + open/close','Push','Grip and lift','Lift and place','Lift and rotate','Rotate and place')
 ACTION_LABELS=('base','shoulder','forearm','wrist','gripper')
-LOW=np.array([-60.,25.,-65.,-75.,0.]); HIGH=np.array([60.,95.,15.,75.,1.])
+LOW=np.array([-60.,25.,-65.,-180.,0.]); HIGH=np.array([60.,95.,15.,180.,1.])
 DELTA=np.array([3.0,3.0,3.0,7.,.16]); DEG=np.pi/180
 DT=.06; FLOOR=65.; TCP_X=173.; WRIST_ORIGIN=26.; TCP_Z=1.
-OBS_SIZE=49
+OBS_SIZE=67
 
 
 def fk(q):
     q=np.atleast_2d(q); a=q[:,0]*DEG;b=q[:,1]*DEG;c=q[:,2]*DEG;t=q[:,3]*DEG
     elbow=np.stack([D['upper']*np.cos(b),np.zeros(len(q)),D['shoulder_height']+D['upper']*np.sin(b)],1)
     w=elbow+np.stack([D['forearm']*np.cos(c),np.zeros(len(q)),D['forearm']*np.sin(c)],1)
-    xy=np.stack([w[:,0]+WRIST_ORIGIN+(TCP_X-WRIST_ORIGIN)*np.cos(t),(TCP_X-WRIST_ORIGIN)*np.sin(t)],1)
-    tcp=np.stack([xy[:,0]*np.cos(a)-xy[:,1]*np.sin(a),xy[:,0]*np.sin(a)+xy[:,1]*np.cos(a),w[:,2]+TCP_Z],1)
+    xy=np.stack([w[:,0]+TCP_X,np.zeros(len(q))],1)
+    tcp=np.stack([xy[:,0]*np.cos(a),xy[:,0]*np.sin(a),w[:,2]],1)
     def rot(p):return np.stack([p[:,0]*np.cos(a)-p[:,1]*np.sin(a),p[:,0]*np.sin(a)+p[:,1]*np.cos(a),p[:,2]],1)
     return tcp,rot(w),rot(elbow)
 
@@ -59,7 +59,7 @@ class World:
         if not m:return
         r=self.rng
         if self.task_setting in TASKS:self.task[ids]=TASKS.index(self.task_setting)
-        elif self.task_setting=='all':self.task[ids]=r.integers(0,5,m)
+        elif self.task_setting=='all':self.task[ids]=r.integers(0,len(TASKS),m)
         else:
             self.task[ids]=self.stage
             review=r.random(m)<.2

@@ -13,7 +13,7 @@ from core.runner import Runner,World
 from core.cloud import HackClubPlanner
 
 ROOT=Path(__file__).resolve().parent
-BUILD='seizo-gripper-v5';PORT=8772
+BUILD='seizo-roll-learning-v6';PORT=8772
 
 class DataLock:
     def __init__(self,path):
@@ -69,7 +69,8 @@ def make_handler(runner,token,quit_event,cloud,instance_id='test-instance'):
                 return self.send(200,html.encode(),'text/html; charset=utf-8')
             if path.startswith('/api/'):
                 if not self.auth():return self.send(403,{'error':'Reopen the home page to restore this session.'})
-                if path=='/api/status':return self.send(200,{**runner.snapshot(),'build':BUILD})
+                if path=='/api/status':return self.send(200,{**runner.snapshot(),'build':BUILD,'cloud':cloud.status()})
+                if path=='/api/experience':return self.send(200,runner.experience_summary())
                 if path=='/api/initial':return self.send(200,World(1,seed=61).frame())
                 if path=='/api/hackclub/status':return self.send(200,cloud.status())
                 return self.send(404,{'error':'No such endpoint. There is no motor or camera control route.'})
@@ -115,7 +116,7 @@ def make_handler(runner,token,quit_event,cloud,instance_id='test-instance'):
                     from core.gripper_check import run_check
                     result=run_check(data.get('mode','open_close'))
                 elif path=='/api/evaluate':
-                    keys(('task',));result=runner.begin_evaluation(data.get('task','reach'))
+                    keys(('task','trials'));result=runner.begin_evaluation(data.get('task','all'),data.get('trials',20))
                 elif path=='/api/reset':
                     keys(('confirmed',))
                     if data.get('confirmed') is not True:raise ValueError('Confirm backup and reset first.')
@@ -134,6 +135,8 @@ def make_handler(runner,token,quit_event,cloud,instance_id='test-instance'):
                     if data.get('confirmed')is not True:raise ValueError('Click Show to reveal your saved key on this screen.')
                     result=cloud.reveal_key()
                 elif path=='/api/hackclub/test':keys(('model',));result=cloud.test_connection(data.get('model','qwen/qwen3-32b'))
+                elif path=='/api/hackclub/review':
+                    keys(('model',));result=cloud.review_results(runner.experience_summary(),data.get('model','qwen/qwen3-32b'))
                 elif path=='/api/quit':keys(());runner.stop();quit_event.set();result={'ok':True}
                 else:return self.send(404,{'error':'No such endpoint. No hardware-control backend exists.'})
                 return self.send(200,result)
@@ -163,7 +166,7 @@ def main():
     quit_event=threading.Event()
     try:
         runner=Runner(a.data_dir)
-        cloud=HackClubPlanner();token=secrets.token_urlsafe(32)
+        cloud=HackClubPlanner(audit_path=a.data_dir/'api_usage.json');token=secrets.token_urlsafe(32)
         try:
             if os.name=='nt':
                 import ctypes

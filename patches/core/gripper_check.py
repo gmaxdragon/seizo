@@ -8,7 +8,7 @@ from .mujoco_world import MuJoCoWorld, RAD
 
 
 def check_world(mode='open_close'):
-    if mode not in ('open_close','wrist','contact'):raise ValueError('Unknown gripper check.')
+    if mode not in ('open_close','wrist','contact','held_roll'):raise ValueError('Unknown gripper check.')
     q=np.array([0.,65.,-25.,0.,1.])
     root=ET.fromstring(xml_model());eq=root.find('equality')
     # Only this diagnostic fixtures the three arm axes to isolate the two servos.
@@ -32,37 +32,44 @@ def check_world(mode='open_close'):
     # Distractors remain in the simulation but out of the hand's test volume.
     for j in range(3):
         if mode=='contact' and j==0:continue
-        d.qpos[w.objadr[j]:w.objadr[j]+3]=[.35,(j-1)*.12,.065+w.radius[0,j]*.001]
+        d.qpos[w.objadr[j]:w.objadr[j]+3]=[.25,.50+j*.10,.065+[.012,.030,.013][j]]
+    if mode=='held_roll':
+        # Pre-position a FREE block for a mechanism check, not a learned pickup.
+        q[4]=.44;w.q[0]=q;w.targetq[0]=q;w._set_pose(d,q);mujoco.mj_forward(m,d)
+        wrist=m.body('wrist_and_palm').id
+        p=d.xpos[wrist]+d.xmat[wrist].reshape(3,3)@np.array([.169,0.,.001])
+        d.qpos[w.objadr[0]:w.objadr[0]+3]=p
     d.qvel[:]=0;mujoco.mj_forward(m,d);w._copy_from_physics((0,))
     return w,q
 
 
 def run_check(mode='open_close'):
     w,target=check_world(mode);d=w.data[0];m=w.model;frames=[]
-    if mode=='wrist':
-        sequence=[('Center',0.,1.,12),('Clockwise',35.,1.,36),('Counterclockwise',-35.,1.,60),('Center',0.,1.,36)]
+    if mode=='held_roll':
+        sequence=[('Close on pre-positioned free block',0.,0.,35),('Roll held block 90 degrees',90.,0.,45),('Release free block',90.,1.,60)]
+    elif mode=='wrist':
+        sequence=[('Roll 0 degrees',0.,1.,12),('Roll 90 degrees',90.,1.,38),('Roll 180 degrees',180.,1.,38),('Roll 270 degrees',270.,1.,38),('Roll 360 degrees',360.,1.,38),('Return to 0 degrees',0.,1.,128)]
     else:
         sequence=[('Open',0.,1.,15),('Close and squeeze' if mode=='contact' else 'Close',0.,0.,65),('Open',0.,1.,55)]
     pad_contact_peak=0.;after_contact_steps=0;seen=False
     for label,wrist,opening,steps in sequence:
         for _ in range(steps):
-            target[3]+=np.clip(wrist-target[3],-1.5,1.5)
-            target[4]+=np.clip(opening-target[4],-.025,.025)
+            target[3]+=np.clip(wrist-target[3],-3.,3.)
+            if mode=='held_roll' and opening==0.:target[4]=0.
+            else:target[4]+=np.clip(opening-target[4],-.025,.025)
             w.targetq[0]=target;w._command(d,target)
             for _ in range(SUBSTEPS):mujoco.mj_step(m,d)
             mujoco.mj_forward(m,d);w._copy_from_physics((0,));w.count[0]+=1
-            force=0.;contact=False
-            for c in d.contact[:d.ncon]:
-                names={m.geom(int(c.geom1)).name,m.geom(int(c.geom2)).name}
-                if 'object_red' in names and any(n and ('jaw_' in n) for n in names):
-                    contact=True
+            state=w.contact_state(0);contact=state['jaw_object']
             if contact:seen=True
             if seen and opening==0.:after_contact_steps+=1
             pad_contact_peak=max(pad_contact_peak,abs(float(d.actuator_force[w.aid['motor_gripper']])))
-            f=w.frame();f['diagnostic']=True;f['diagnostic_phase']=label;f['task_label']='Gripper mechanism check (not AI learning)';f['arm_object_contact']=contact
+            f=w.frame();f['diagnostic']=True;f['diagnostic_phase']=label;f['task_label']='Gripper mechanism check (not AI learning)';f['arm_object_contact']=state['arm_object'];f['gripper_object_contact']=contact
             if mode=='contact':f['objects'][0]['name']='fixed test block (diagnostic only)'
+            if mode=='held_roll':f['objects'][0]['name']='pre-positioned free block (mechanism check)'
+            f['object_prepositioned_for_mechanism_check']=mode=='held_roll'
             frames.append(f)
-    return dict(frames=frames,mode=mode,diagnostic=True,diagnostic_message='Mechanical simulation check only. Arm axes fixed. No learning or physical commands.',
+    return dict(roll_axis='longitudinal X, wrist to fingertips',full_roll_requested=(mode=='wrist'),frames=frames,mode=mode,diagnostic=True,diagnostic_message='Mechanical simulation check only. Arm axes fixed. No learning or physical commands.',
                 weights_updated=False,physical_motion=False,success=False,fault=False,policy_updates=0,
                 contact_seen=seen,continued_closing_steps_after_contact=after_contact_steps,
                 peak_virtual_gripper_torque_nm=pad_contact_peak)

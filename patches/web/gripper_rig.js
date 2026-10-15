@@ -2,7 +2,7 @@
  * A frame from MuJoCo overrides ideal transforms with actual simulated body poses.
  * Opening=0 is the CLOSED jaw geometry. Never translate it farther inward.
  */
-import {T,S,RZ,compose,point,V} from './renderer.js';
+import {T,S,RX,RZ,compose,point,V} from './renderer.js';
 export function setupGripper(R,spec){
  const jawParts=[],bars=[],gears=[];
  for(const p of R.parts){
@@ -27,7 +27,7 @@ export function setupGripper(R,spec){
  }
  function update(frame,baseWrist){
   const p=frame.pose;const angle=(p.wrist||0)*Math.PI/180;
-  const shaft=compose(baseWrist,T(...spec.wrist_pivot),RZ(angle),T(...spec.wrist_pivot.map(v=>-v)));
+  const shaft=compose(baseWrist,T(...spec.wrist_pivot),RX(angle),T(...spec.wrist_pivot.map(v=>-v)));
   const a=Math.max(0,Math.min(1,p.gripper??.6))*spec.max_link_angle_rad;
   const [lx,ly]=spec.link;
   const dx=lx*(Math.cos(a)-1)-ly*Math.sin(a),dy=lx*Math.sin(a)+ly*(Math.cos(a)-1);

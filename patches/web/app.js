@@ -8,25 +8,37 @@ let suggestedLesson=null;
 async function api(path,body){
  if(body!==undefined&&['/api/start','/api/stop'].includes(path))body={...body,control_seq:++controlSeq};
  const abort=new AbortController();
- const limit=path.includes('/hackclub/test')||path.includes('/hackclub/review')?40000:['/api/trial','/api/gripper-check'].includes(path)?90000:15000;
+ const limit=path.includes('/hackclub/test')||path.includes('/hackclub/review')?40000:['/api/trial','/api/gripper-check'].includes(path)?180000:['/api/initial','/api/cameras/preview'].includes(path)?60000:15000;
  const timer=setTimeout(()=>abort.abort(),limit);
  try{
   const r=await fetch(path,{method:body===undefined?'GET':'POST',headers:{'X-Lab-Token':token,...(body===undefined?{}:{'Content-Type':'application/json'})},body:body===undefined?undefined:JSON.stringify(body),cache:'no-store',signal:abort.signal});
-  let j;try{j=await r.json()}catch(e){throw Error('The local app returned an unreadable reply. Reopen the address printed by START.bat.');}
+  let j;try{j=await r.json()}catch(e){throw Error('The local app returned an unreadable reply. Reopen the address printed by START_SEIZO.bat.');}
   if(!r.ok)throw Error(j.error||`Local request failed (${r.status}).`);
   return j;
  }catch(e){
-  if(e.name==='AbortError')throw Error('This request timed out. The key was not deleted. Keep START.bat open and try again.');
-  if(e instanceof TypeError)throw Error('Cannot reach the local Seizo app. Run START.bat and use the READY address it prints, not an old bookmark.');
+  if(e.name==='AbortError')throw Error('This request timed out. The key was not deleted. Keep START_SEIZO.bat open and try again.');
+  if(e instanceof TypeError)throw Error('Cannot reach the local Seizo app. Run START_SEIZO.bat and use the READY address it prints, not an old bookmark.');
   throw e;
  }finally{clearTimeout(timer);}
 }
 function say(s,error=false){$('status').textContent=s;$('status').className=error?'error':'';}
 function fail(e){say(e.message||String(e),true);}
 function task(){const s=$('task').value;return TASKS.includes(s)?s:s==='all'?TASKS[Math.floor(Math.random()*TASKS.length)]:TASKS[status?.stage||0];}
-function controls(){const unavailable=!connected;const active=['training','stopping','evaluating'].includes(status?.status);$('train').disabled=unavailable||active||busy;$('watch').disabled=unavailable||!graphicsReady||active||busy;$('evaluate').disabled=unavailable||active||busy;$('task').disabled=unavailable||active||busy;$('gripperCheck').disabled=unavailable||!graphicsReady||active||busy;$('reviewAI').disabled=unavailable||active||busy;}
+let cameraURLs={},lastCameraSerial=-1;
+function cameraFrames(frame){
+ const c=frame?.cameras;if(!c)return;
+ for(const [name,id] of [['overhead','overheadFrame'],['wrist','wristFrame']]){
+  if(!c[name])continue;
+  if(cameraURLs[name])URL.revokeObjectURL(cameraURLs[name]);
+  const bytes=Uint8Array.from(atob(c[name]),c=>c.charCodeAt(0));
+  cameraURLs[name]=URL.createObjectURL(new Blob([bytes],{type:'image/png'}));$(id).src=cameraURLs[name];
+ }
+ const p=c.settings||{};
+ $('cameraState').textContent=`Policy input: ONLY these two RGB frames + their previous frames + task instructions. Setup: ${p.profile||'unknown'}; overhead ${p.overhead_fovy?.toFixed(0)||'?'}° FOV. ${frame.safety_abort?'Trial aborted: '+frame.safety_abort+'.':''}`;
+}
+function controls(){const unavailable=!connected;const active=['training','stopping','evaluating','watching'].includes(status?.status);$('train').disabled=unavailable||active||busy;$('watch').disabled=unavailable||!graphicsReady||active||busy;$('evaluate').disabled=unavailable||active||busy;$('task').disabled=unavailable||active||busy;$('gripperCheck').disabled=unavailable||!graphicsReady||active||busy;$('reviewAI').disabled=unavailable||active||busy;}
 function show(f){
- latestFrame=f;if(!view||!graphicsReady)return;view.show(f);
+ latestFrame=f;cameraFrames(f);if(f.diagnostic)$('cameraState').textContent='Scripted mechanism check: camera learning is inactive. The images above retain the last policy observation.';if(!view||!graphicsReady)return;view.show(f);
  const selected=f.objects[f.selected_object],roll=((f.pose.wrist%360)+360)%360;
  let touch=f.gripper_object_contact?`Finger contact${f.gripper_contact_continues?' / bounded squeeze':''}`:
              f.contacts?.arm_object?'Arm touching an object':f.contacts?.environment?'Arm touching the table':'No finger contact';
@@ -54,21 +66,28 @@ function frame(t){
 }
 $('train').onclick=async()=>{busy=true;controls();epoch++;play=null;try{say('Starting local neural training...');await api('/api/start',{episodes:+$('episodes').value,task:$('task').value,compute:$('compute').value,fault_probability:0});lastId=0;await poll();}catch(e){fail(e)}finally{busy=false;controls()}};
 $('stop').onclick=async()=>{epoch++;play=null;say('Displayed movement stopped. Saving policy...');try{await api('/api/stop',{});await poll();}catch(e){fail(e)}};
-$('watch').onclick=async()=>{busy=true;controls();const id=++epoch;play=null;say('Running a frozen virtual-policy trial...');try{const tr=await api('/api/trial',{task:task(),source:$('source').value,fault:$('fault').checked});if(id!==epoch)return;begin(tr,tr.policy_updates?'Saved neural policy':'Untrained neural policy: random exploration');say(tr.policy_updates?'Watching learned decisions. No weights change during this test.':'Watching the untrained policy. It has not learned yet.');}catch(e){fail(e)}finally{busy=false;controls()}};
+$('watch').onclick=async()=>{busy=true;controls();const id=++epoch;play=null;say('Running a frozen virtual-policy trial...');try{const tr=await api('/api/trial',{task:task(),source:$('source').value,fault:$('fault').checked});if(id!==epoch)return;begin(tr,tr.policy_updates?'Updated policy, skill not guaranteed':'Untrained neural policy: random exploration');say(tr.policy_updates?'Testing updated policy weights. Improvement is not guaranteed. No learning during this test.':'Watching the untrained policy. It has not learned yet.');}catch(e){fail(e)}finally{busy=false;controls()}};
 $('evaluate').onclick=async()=>{epoch++;play=null;try{say('Testing ALL seven tasks and paired random baselines. No cloud calls or weight updates.');await api('/api/evaluate',{task:'all',trials:+$('evalTrials').value});await poll()}catch(e){fail(e)}};
 let polling=false;
-async function poll(){if(polling||closed)return;polling=true;try{status=await api('/api/status');connected=true;$('connection').textContent='Local app connected · '+location.host;$('connection').className='online';let s=status;const nf=n=>Number(n).toLocaleString();$('physicsBadge').textContent=s.build+' · '+s.physics;$('progress').textContent=`${nf(s.episodes)} / ${nf(s.target_episodes)} completed episodes · ${nf(s.moves)} movements · ${nf(s.updates)} network updates`;$('bar').max=s.target_episodes;$('bar').value=s.episodes;
- if(s.status==='training'){say(`Learning: ${s.lesson}. ${s.episodes<1?'Exploring before the first completed episode.':''}`);let tr=s.trace;if(graphicsReady&&!play&&tr&&tr.id!==lastId){lastId=tr.id;begin(tr,`Training exploration from episode ${nf(tr.episode)}`);}let eta=s.estimated_seconds_remaining;$('outcome').textContent=`Showing a sampled trial, not every background movement. ${eta?`At the measured rate, remaining budget is about ${Math.ceil(eta/3600)} hours (rough estimate).`:''}`;}
- else if(s.status==='stopping')say('Stopped. Finishing the current update and saving...');
+async function poll(){if(polling||closed)return;polling=true;try{status=await api('/api/status');connected=true;$('connection').textContent='Local app connected · '+location.host;$('connection').className='online';let s=status;if(s.live_camera&&s.live_camera.serial!==lastCameraSerial){lastCameraSerial=s.live_camera.serial;cameraFrames(s.live_camera);}const nf=n=>Number(n).toLocaleString();$('physicsBadge').textContent=s.build+' · '+s.physics;$('progress').textContent=`${nf(s.episodes)} / ${nf(s.target_episodes)} completed episodes · ${nf(s.moves)} movements · ${nf(s.updates)} network updates`;$('saveStatus').textContent=s.save_verified&&s.saved_fingerprint===s.policy_fingerprint?
+  `Saved and verified by reload: ${new Date(s.last_saved*1000).toLocaleTimeString()} · policy ${s.saved_fingerprint.slice(0,10)}. Safe to close after the run is idle.`:
+  (s.status==='stopping'?'Not finished saving yet. Keep the terminal open.':'Current changes are not yet checkpointed. STOP & save before closing.');
+ $('bar').max=s.target_episodes;$('bar').value=s.episodes;
+ if(s.status==='training'){say(`Practising ${s.lesson}. This is the current lesson, not a pass. ${s.episodes<1?'Exploring before the first completed episode.':''}`);let tr=s.trace;if(graphicsReady&&!play&&tr&&tr.id!==lastId){lastId=tr.id;begin(tr,`Training exploration from episode ${nf(tr.episode)}`);}let eta=s.estimated_seconds_remaining;$('outcome').textContent=`Showing a sampled trial, not every background movement. ${eta?`At the measured rate, remaining budget is about ${Math.ceil(eta/3600)} hours (rough estimate).`:''}`;}
+ else if(s.status==='stopping')say('Stop requested. Waiting for the current operation to stop and the checkpoint to verify...');
  else if(s.status==='evaluating')say(`Frozen evaluation: ${s.evaluation_progress?.phase||'starting'} · ${s.evaluation_progress?.completed||0}/${s.evaluation_progress?.total||7} tasks. No learning or API calls.`);
+ else if(s.status==='watching')say('Computing a camera-only policy test. STOP cancels it.');
  else if(s.status==='error')say(s.error,true);
- else if(!play&&!busy)say(s.updates?`Saved. ${nf(s.updates)} neural updates completed. Choose Watch policy or Check progress.`:'Ready. The policy starts untrained. Watch it first, then Train / resume.');
- $('learningEvidence').textContent=`Learning evidence: ${nf(s.parameters_changed_from_initial||0)} parameter values differ from the initial network. ${s.weights_changed_from_initial?'Weights changed; evaluation determines whether performance improved.':'No learned weight change yet.'}`;
+ else if(!play&&!busy)say(s.updates?`Idle. ${nf(s.updates)} neural updates completed. See saved-checkpoint status below.`:'Ready. The policy starts untrained. Watch it first, then Train / resume.');
+ $('learningEvidence').textContent=`Parameter-update evidence, not skill mastery: ${nf(s.parameters_changed_from_initial||0)} parameter values differ from the initial network. ${s.weights_changed_from_initial?'Weights changed; evaluation determines whether performance improved.':'No parameter update yet.'}`;
  const usage=s.cloud?.api_usage;
  if(usage)$('apiActivity').textContent=`API: ${usage.attempts} request attempts · ${usage.successful_responses} accepted responses · ${usage.total_tokens} reported tokens. Last: ${usage.last?.purpose||'none'}. Training uses 0 API calls.`;
- if(s.evaluation&&JSON.stringify(s.evaluation)!==evalSeen){
-  evalSeen=JSON.stringify(s.evaluation);const e=s.evaluation,box=$('evaluation');box.replaceChildren();
-  const heading=document.createElement('p');heading.textContent=`Frozen test complete: ${e.current.successes}/${e.current.trials} successful tasks. Failures are kept. Weights unchanged: ${e.fingerprint_unchanged}.`;box.append(heading);
+ if(!s.evaluation&&evalSeen){$('evaluation').replaceChildren();evalSeen='';}
+ const evaluationStamp=s.evaluation?JSON.stringify(s.evaluation)+s.policy_fingerprint+JSON.stringify(s.camera_config):'';
+ if(s.evaluation&&evaluationStamp!==evalSeen){
+  evalSeen=evaluationStamp;const e=s.evaluation,box=$('evaluation');box.replaceChildren();
+  const matches=e.policy_fingerprint===s.policy_fingerprint&&JSON.stringify(e.camera_config||{})===JSON.stringify(s.camera_config||{});
+  const heading=document.createElement('p');heading.textContent=`${matches?'CURRENT policy evaluation':'OLDER evaluation: policy or camera settings changed'}. At ${e.episodes_at_test} episodes: ${e.current.successes}/${e.current.trials} successful trials. This is not proof of mastery. Evaluation itself changed no weights: ${e.fingerprint_unchanged}.`;box.append(heading);
   const table=document.createElement('table');const head=document.createElement('tr');
   for(const text of ['Task','Policy success','Random success','95% interval']){let cell=document.createElement('th');cell.textContent=text;head.append(cell)}table.append(head);
   for(const r of e.by_task||[]){const tr=document.createElement('tr'),c=r.current,ci=c.success_interval_95;
@@ -133,3 +152,14 @@ async function init(){
  }catch(e){graphicsError(e.message||String(e));}
 }
 init();
+
+$('applyCameras').onclick=async()=>{
+ try{
+ const value={profile:$('cameraProfile').value,overhead_height_m:Number($('cameraHeight').value)/100,
+   overhead_side_m:Number($('cameraSide').value)/100,wrist_mount:$('cameraMount').value,frame_faults:$('cameraFaults').checked};
+ await api('/api/cameras/config',value);
+ const frame=await api('/api/cameras/preview',{});show(frame);say('Camera setup saved. This preview is not a learned trial.');
+ await poll();
+ }catch(e){fail(e)}
+};
+$('sampleCameras').onclick=async()=>{try{const frame=await api('/api/cameras/preview',{});show(frame);say('Another bounded simulated camera setup. No training was started.')}catch(e){fail(e)}};

@@ -89,7 +89,7 @@ def prepare_rigid_body_engine(python):
     leaves viewing available but blocks realistic training/checks in the HTTP API.
     """
     if os.environ.get('SEIZO_PHYSICS_ENGINE','auto').lower()=='capsule':
-        report('Fast approximate physics explicitly selected.');return
+        raise RuntimeError('This release trains from simulated camera images and requires MuJoCo. Run the normal START_SEIZO.bat, not the old diagnostic capsule mode.')
     try:
         check=subprocess.run([str(python),'-c','import mujoco; m=mujoco.MjModel.from_xml_string("<mujoco><worldbody/></mujoco>");print(m.nbody)'],
                              timeout=20,capture_output=True,text=True)

@@ -39,6 +39,7 @@ class MuJoCoWorld(base.World):
 
     def __init__(self,n=1,seed=41,task='reach',fault_probability=0.0,xml_text=None):
         self._physics_ready=False
+        if not hasattr(self,'floor_heights'):self.floor_heights=np.full(int(n),base.FLOOR)
         self.tcp=np.zeros((int(n),3))
         self.object_rotations=np.tile(np.eye(3),(int(n),3,1,1))
         self.goal_rotation=np.tile(np.eye(3),(int(n),1,1))
@@ -64,6 +65,12 @@ class MuJoCoWorld(base.World):
         self.robot_bodies={i for i in range(1,self.model.nbody) if self.model.body(i).name not in OBJECT_NAMES}
         self._physics_ready=True
         self.reset()
+
+    def _prepare_environment(self,i):
+        self.model.geom_pos[self.model.geom('desk').id,2]=self.floor_heights[i]/1000.
+
+    def _integrate(self,i):
+        for _ in range(SUBSTEPS):mujoco.mj_step(self.model,self.data[i])
 
     def _set_pose(self,data,q):
         # q uses degrees for angles; forearm is an ABSOLUTE pitch, not elbow-relative.
@@ -111,8 +118,9 @@ class MuJoCoWorld(base.World):
         for i in ids:
             d=self.data[int(i)];m=self.model
             mujoco.mj_resetData(m,d)
+            self._prepare_environment(int(i))
             self.radius[i]=OBJECT_RADII
-            self.objects[i,:,2]=base.FLOOR+OBJECT_HALFHEIGHT
+            self.objects[i,:,2]=self.floor_heights[i]+OBJECT_HALFHEIGHT
             self.mass[i]=np.array([m.body_mass[self.bid[n]] for n in OBJECT_NAMES])
             self.friction[i]=.95
             self._set_pose(d,self.q[i])
@@ -129,13 +137,13 @@ class MuJoCoWorld(base.World):
                     candidate=np.clip(candidate,base.LOW,base.HIGH)
                     self._set_pose(d,candidate);mujoco.mj_forward(m,d)
                     goal=d.site_xpos[self.sid]*1000.
-                    if np.linalg.norm(goal-tcp)>30. and goal[2]>base.FLOOR+15.:break
+                    if np.linalg.norm(goal-tcp)>30. and goal[2]>self.floor_heights[i]+15.:break
                 self.goal[i]=goal
                 self._set_pose(d,current);mujoco.mj_forward(m,d)
             else:
                 # A reachable initial object at the pad/fingers, deliberately ungrasped.
                 self.objects[i,chosen,:2]=tcp[:2]+self.rng.uniform(-9,9,2)
-                self.objects[i,chosen,2]=base.FLOOR+OBJECT_HALFHEIGHT[chosen]
+                self.objects[i,chosen,2]=self.floor_heights[i]+OBJECT_HALFHEIGHT[chosen]
                 delta=self.rng.uniform(-np.pi,np.pi)
                 shift=self.rng.uniform(40.,65.)
                 self.goal[i]=self.objects[i,chosen]+[math.cos(delta)*shift,math.sin(delta)*shift,0.]
@@ -150,7 +158,7 @@ class MuJoCoWorld(base.World):
                 self.wrist_goal[i]=float(angle*DEG + self.rng.choice([-90.,90.]))
                 self.goal_rotation[i]=rz(self.q[i,0]*RAD)@rx(self.wrist_goal[i]*RAD)
                 self.objects[i,chosen,:2]=tcp[:2]+self.rng.uniform(-6,6,2)
-                self.objects[i,chosen,2]=base.FLOOR+self.support_height(i,chosen)
+                self.objects[i,chosen,2]=self.floor_heights[i]+self.support_height(i,chosen)
                 if task==5:
                     self.goal[i]=self.objects[i,chosen]+[0.,0.,55.]
                 else:
@@ -178,7 +186,7 @@ class MuJoCoWorld(base.World):
         return 13.
 
     def floor_clearance(self):
-        return np.array([self.objects[i,j,2]-base.FLOOR-self.support_height(i,j)
+        return np.array([self.objects[i,j,2]-self.floor_heights[i]-self.support_height(i,j)
                          for i,j in enumerate(self.target_obj)])
 
     def contact_state(self,i):
@@ -310,9 +318,10 @@ class MuJoCoWorld(base.World):
         self.last_contact[:]=False
         for i,d in enumerate(self.data):
             if triggered[i] or not active[i]:continue
+            self._prepare_environment(i)
             self._command(d,requested[i])
             try:
-                for _ in range(SUBSTEPS):mujoco.mj_step(self.model,d)
+                self._integrate(i)
             except mujoco.FatalError as e:
                 raise RuntimeError('MuJoCo failed to integrate a virtual step.') from e
             # Refresh derived body transforms at the final integrated pose.
@@ -326,7 +335,7 @@ class MuJoCoWorld(base.World):
         self.ever_lifted|=lift>50.
         phi,success,metrics=self.metrics()
         self.dwell=np.where(success,self.dwell+1,0)
-        success=(self.dwell>=4)&(self.count>=8)&(~triggered)
+        success=(self.dwell>=4)&(self.count>=8)&(~triggered)&(~self.physics_failures)
         self.blocked=np.any(np.isclose(self.q[:,:3],base.LOW[:3],atol=.1)|
                             np.isclose(self.q[:,:3],base.HIGH[:3],atol=.1),axis=1)
         reward=np.clip(2*(phi-self.previous_phi),-3.,3.)-.015-.002*np.sum(a*a,1)-self.blocked*.06+success*5.
@@ -346,6 +355,7 @@ class MuJoCoWorld(base.World):
 
     def frame(self,i=0):
         frame=super().frame(i)
+        frame['floor_z']=float(self.floor_heights[i])
         frame['tool']=self.tcp[i].tolist()
         frame['physics_backend']='MuJoCo 3D rigid bodies, real contacts and bounded motor torque (uncalibrated)'
         frame['collision_model']='MuJoCo: hollow-jaw convex pieces, coupled fixed-length jaw links, bounded gripping force, solid arm proxies; uncalibrated'

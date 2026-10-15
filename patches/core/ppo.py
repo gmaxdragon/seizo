@@ -15,9 +15,11 @@ from .world import OBS_SIZE, MODEL_ID
 class Agent:
     def __init__(self,seed=101,hidden=64):
         self.rng=np.random.default_rng(seed);self.hidden=hidden;self.seed=seed
+        self.obs_size=getattr(self,'OBSERVATION_SIZE',OBS_SIZE)
+        self.model_id=getattr(self,'POLICY_MODEL_ID',MODEL_ID)
         self.p={};self.m={};self.v={};self.t=0;self.updates=0;self.steps=0;self.episodes=0
         for prefix,lastscale in [('p',.01),('v',1.)]:
-            self.p[prefix+'1']=self.rng.normal(0,np.sqrt(2/OBS_SIZE),(OBS_SIZE,hidden)).astype(np.float32)
+            self.p[prefix+'1']=self.rng.normal(0,np.sqrt(2/self.obs_size),(self.obs_size,hidden)).astype(np.float32)
             self.p[prefix+'b1']=np.zeros(hidden,np.float32)
             self.p[prefix+'2']=self.rng.normal(0,np.sqrt(2/hidden),(hidden,hidden)).astype(np.float32)
             self.p[prefix+'b2']=np.zeros(hidden,np.float32)
@@ -93,7 +95,7 @@ class Agent:
 
     def save(self,path,metadata=None):
         path=Path(path);path.parent.mkdir(parents=True,exist_ok=True)
-        meta={'model_id':MODEL_ID,'obs_size':OBS_SIZE,'hidden':self.hidden,'seed':self.seed,'t':self.t,
+        meta={'model_id':self.model_id,'obs_size':self.obs_size,'hidden':self.hidden,'seed':self.seed,'t':self.t,
               'updates':self.updates,'steps':self.steps,'episodes':self.episodes,'rng':self.rng.bit_generator.state,
               'extra':metadata or {},'fingerprint':self.signature()}
         data={'meta':np.array(json.dumps(meta))}
@@ -110,7 +112,7 @@ class Agent:
     def load(cls,path):
         with np.load(path,allow_pickle=False) as z:
             meta=json.loads(str(z['meta']))
-            if meta.get('model_id')!=MODEL_ID or meta.get('obs_size')!=OBS_SIZE:raise ValueError('Incompatible policy. Weights from another physics engine cannot be used for this one.')
+            if meta.get('model_id')!=getattr(cls,'POLICY_MODEL_ID',MODEL_ID) or meta.get('obs_size')!=getattr(cls,'OBSERVATION_SIZE',OBS_SIZE):raise ValueError('Incompatible policy. Weights from another physics engine cannot be used for this one.')
             if meta.get('hidden')!=64:raise ValueError('Unrecognized network size.')
             a=cls(meta['seed'],meta['hidden'])
             for prefix,group in [('p',a.p),('m',a.m),('v',a.v)]:
@@ -148,6 +150,7 @@ def rollout(agent,world,length=96,on_episode=None,on_frame=None,stop=None):
                 pass
             agent.episodes+=1
             result={k:bool(info[k][i]) for k in ('success','fault','fallen')}
+            result['safety_abort']=bool(info.get('invalid_physics',np.zeros(world.n,bool))[i])
             result.update({'task':int(info['task'][i]),'steps':int(info['steps'][i]),
                            'return':float(info['return'][i]),'episode':agent.episodes})
             completed.append(result)
@@ -156,4 +159,4 @@ def rollout(agent,world,length=96,on_episode=None,on_frame=None,stop=None):
     if not rows:return None,completed
     fields=[np.stack([r[i] for r in rows]) for i in range(8)]
     obs,z,lp,val,reward,nv,term,done=fields;advantages,returns=gae(reward,val,nv,term,done)
-    return (obs.reshape(-1,OBS_SIZE),z.reshape(-1,5),lp.ravel(),advantages.ravel(),returns.ravel()),completed
+    return (obs.reshape(-1,obs.shape[-1]),z.reshape(-1,5),lp.ravel(),advantages.ravel(),returns.ravel()),completed

@@ -91,7 +91,7 @@ class LauncherTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td, socket.socket() as occupied:
             occupied.bind(('127.0.0.1',0));occupied.listen()
             port=occupied.getsockname()[1];data=Path(td)/'data'
-            command=[sys.executable,'-u',str(ROOT/'app.py'),'--no-browser','--data-dir',str(data),'--port',str(port)]
+            command=[sys.executable,*(['-S'] if sys.flags.no_site else []),'-u',str(ROOT/'app.py'),'--no-browser','--data-dir',str(data),'--port',str(port)]
             log=Path(td)/'console.txt'
             with log.open('w+') as console:
                 p=subprocess.Popen(command,stdout=console,stderr=subprocess.STDOUT,cwd=td)

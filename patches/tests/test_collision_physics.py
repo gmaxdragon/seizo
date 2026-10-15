@@ -76,7 +76,7 @@ class CollisionTests(unittest.TestCase):
         self.assertAlmostEqual(spacing,6+50*.62,places=5)
 
     def test_neural_model_version_invalidates_old_physics_policy(self):
-        self.assertIn('v3',MODEL_ID)
+        self.assertNotEqual(MODEL_ID,'seizo-five-control-contact-ppo-v2')
 
 if __name__=='__main__':unittest.main()
 

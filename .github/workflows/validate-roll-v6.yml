@@ -1,0 +1,82 @@
+name: Seizo axial roll v6 validation
+on:
+  push:
+    branches: [seizo-roll-v6]
+    paths: [.github/workflows/validate-roll-v6.yml]
+permissions:
+  contents: read
+jobs:
+  validate:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    defaults:
+      run:
+        shell: bash
+    env:
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '1'
+      SEIZO_PHYSICS_ENGINE: mujoco
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install isolated simulation test dependencies
+        run: python -m pip install --disable-pip-version-check 'numpy<3' 'mujoco==3.3.7'
+      - name: Assemble exact audited source
+        run: python scripts/assemble_roll_v6.py
+      - name: Physics, learning, API security and platform tests
+        working-directory: Seizo_Learn
+        run: |
+          python -m compileall -q core app.py bootstrap.py
+          python -m unittest discover -s tests -p 'test_*.py' -v 2>&1 | tee evidence/roll-tests.txt
+          node tests/gripper_model.mjs | tee evidence/geometry-check.json
+      - name: Install real browser test dependencies
+        if: runner.os == 'Linux'
+        run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+      - name: Actual WebGL and seven-task browser workflow
+        if: runner.os == 'Linux'
+        working-directory: Seizo_Learn
+        run: python tests/browser_roll_v6.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: seizo-roll-v6-${{ runner.os }}-evidence
+          path: Seizo_Learn/evidence/
+          retention-days: 7
+  stage-audited-source:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: seizo-roll-v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Materialize verified source on isolated branch only
+        run: |
+          python scripts/assemble_roll_v6.py
+          python - <<'PY'
+          import json,shutil
+          from pathlib import Path
+          for name in json.loads(Path('roll-v6-paths.json').read_text()):
+              target=Path('patches')/name
+              target.parent.mkdir(parents=True,exist_ok=True)
+              shutil.copyfile(Path('Seizo_Learn')/name,target)
+          PY
+          git config user.name 'Seizo validation'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add patches
+          git commit -m 'Validated axial-roll v6 source; desktop release still manual'
+          git push origin HEAD:seizo-roll-v6
+          git rev-parse HEAD

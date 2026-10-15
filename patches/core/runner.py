@@ -36,12 +36,13 @@ def atomic_json(path,obj):
 
 
 def evaluate(agent,task,n=20,seed=810017,random_policy=False,stop=None,fault_probability=0.0,
-             world_factory=World,world_options=None,on_trial=None):
+             world_factory=World,world_options=None,on_trial=None,on_timing=None):
     """Frozen policy. Camera cases run sequentially to bound GPU/CPU memory."""
     if task not in TASKS or type(n) is not int or not 1<=n<=200:raise ValueError('Invalid evaluation task/count.')
     signature=agent.signature();records=[]
     for trial in range(n):
         if stop and stop():raise InterruptedError('Evaluation stopped; no partial pass claimed.')
+        trial_started=time.perf_counter()
         w=world_factory(n=1,seed=seed+trial*97,task=task,fault_probability=fault_probability,**(world_options or {}))
         rng=np.random.default_rng(seed+trial*97+10)
         try:
@@ -56,6 +57,7 @@ def evaluate(agent,task,n=20,seed=810017,random_policy=False,stop=None,fault_pro
             else:raise RuntimeError('Unfinished evaluation trial')
         finally:
             if hasattr(w,'close'):w.close()
+        if on_timing:on_timing(task,random_policy,time.perf_counter()-trial_started,fault_probability)
         if on_trial:on_trial(trial+1,n)
     assert signature==agent.signature(),'Evaluation altered neural weights'
     k=sum(int(r['success']) for r in records);faults=sum(int(r['fault']) for r in records)
@@ -198,6 +200,7 @@ class Runner:
             def complete(item):
                 with self.lock:
                     c=self.counts[item['task']];c['attempts']+=1;c['successes']+=int(item['success']);self.recent.append(int(item['success']));c['safety_aborts']=c.get('safety_aborts',0)+int(item.get('safety_abort',False))
+                if hasattr(self,'record_training_episode'):self.record_training_episode(item)
             def frame(world,info):
                 nonlocal trace
                 if info is None:
@@ -229,7 +232,7 @@ class Runner:
                 if time.monotonic()-last_save>25:self.save();last_save=time.monotonic()
                 if self.agent.steps>=next_eval and not stopped():
                     clone=self.agent.clone();task=TASKS[self.stage] if self.config['task']=='curriculum' else (self.config['task'] if self.config['task'] in TASKS else 'reach')
-                    val=evaluate(clone,task,getattr(self,'validation_trials',5 if self.is_camera else 24),seed=812321+int(self.agent.steps//16000)*91,stop=self.stop_event.is_set,world_factory=self.World,world_options=self.evaluation_options())
+                    val=evaluate(clone,task,getattr(self,'validation_trials',5 if self.is_camera else 24),seed=812321+int(self.agent.steps//16000)*91,stop=self.stop_event.is_set,world_factory=self.World,world_options=self.evaluation_options(),on_timing=getattr(self,'record_trial_time',None))
                     if hasattr(self,'after_validation'):self.after_validation(val,env)
                     with self.lock:
                         self.validation=val
@@ -364,12 +367,12 @@ class Runner:
                     for label in ('policy','random'):
                         with self.lock:self.evaluation_progress={'phase':name+' / '+label,'completed':index,'total':len(names)}
                         value=evaluate(current if label=='policy' else initial,name,trials,seed+index*1000,
-                                       random_policy=(label=='random'),stop=self.stop_event.is_set,world_factory=self.World,world_options=self.evaluation_options(),on_trial=self._eval_trial)
+                                       random_policy=(label=='random'),stop=self.stop_event.is_set,world_factory=self.World,world_options=self.evaluation_options(),on_trial=self._eval_trial,on_timing=getattr(self,'record_trial_time',None))
                         if label=='policy':now=value
                         else:baseline=value
                     rows.append({'current':now,'random_actions':baseline})
                 # Fault exercise stays separate from clean task scores.
-                faults=evaluate(current,'reach',max(5,trials//2),seed+9000,stop=self.stop_event.is_set,fault_probability=1.,world_factory=self.World,world_options=self.evaluation_options())
+                faults=evaluate(current,'reach',max(5,trials//2),seed+9000,stop=self.stop_event.is_set,fault_probability=1.,world_factory=self.World,world_options=self.evaluation_options(),on_timing=getattr(self,'record_trial_time',None))
                 def combine(key):
                     vals=[r[key] for r in rows];n=sum(v['trials'] for v in vals);passed=sum(v['successes'] for v in vals)
                     return {'task':task,'trials':n,'successes':passed,'success_rate':passed/n,

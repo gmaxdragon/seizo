@@ -10,9 +10,9 @@ from core.mjcf import validate_structure, xml_model, MODEL_VERSION
 
 
 class TestMJCFStatic(unittest.TestCase):
-    def test_physical_model_has_six_joints_and_free_objects(self):
+    def test_physical_model_has_nine_joints_and_free_objects(self):
         info=validate_structure()
-        self.assertEqual(info['joints'],6)
+        self.assertEqual(info['joints'],9)
         self.assertEqual(info['actuators'],5)
         self.assertEqual(info['free_objects'],3)
 
@@ -37,8 +37,8 @@ class TestMuJoCoDynamics(unittest.TestCase):
     def test_model_compiles_and_geometries_are_distinct(self):
         model=mujoco.MjModel.from_xml_string(xml_model())
         self.assertEqual(model.nu,5)
-        self.assertEqual(model.nq,27)
-        self.assertEqual(model.nv,24)
+        self.assertEqual(model.nq,30)
+        self.assertEqual(model.nv,27)
         names=[mujoco.mj_id2name(model,mujoco.mjtObj.mjOBJ_GEOM,i) for i in range(model.ngeom)]
         self.assertIn('forearm_crossbar_mid',names)
         self.assertIn('left_jaw_contact',names)

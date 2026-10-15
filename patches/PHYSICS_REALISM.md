@@ -1,49 +1,56 @@
-# Seizo realistic physics (v4, provisional)
+# Seizo two-servo gripper correction, v5
 
-The **PEAC** Railway website is a different project and is not modified by this work.
-Seizo is local-only: no Railway compute, Raspberry Pi, GPIO, serial, or robot motor control.
+This is computer simulation only. No Raspberry Pi, serial/GPIO controller,
+physical-motor command path, or Railway service was changed.
 
-## Two honest simulation backends
+## What was wrong
 
-1. **MuJoCo** (preferred when installed): physically integrated *rigid bodies*,
-   gravity, joint inertia, motor force limits, joint damping, friction, sliding
-   gripper fingers driven by one coupled gripper servo, force-based contact; the red cube, green cylinder and
-   blue ball have their correct primitive collision shapes. Physics advances
-   at 2 ms internal substeps. An RL movement command spans 30 substeps.
-2. **Approximate** (if MuJoCo installation fails or user chooses fast mode):
-   existing capsule/sphere proxy environment. It is substantially faster but
-   not equivalent to MuJoCo. The app displays which backend it uses.
+The previous displayed jaw was already tapered toward its closed centerline,
+but the renderer translated it inward again. The visible tips crossed. The old
+physics model also explicitly excluded collisions between the opposing jaws.
+Wrist leveling and visible tool coordinates could disagree with physics.
 
-The starter offers a one-time `mujoco` Python-wheel install. To request explicit
-fallback launch with `SEIZO_PHYSICS_ENGINE=capsule`; to demand full physics
-set `SEIZO_PHYSICS_ENGINE=mujoco`. `auto` uses full physics when available.
+## Corrected mechanism
 
-## Incomplete calibration (must not exaggerate)
+Five actuators total: three main arm controls, ONE wrist actuator rotating the
+whole tool, and ONE gripper actuator driving a coupled pair of jaw linkages.
+The additional linkage follower joints are passive constraints, not servos.
+The jaws remain parallel, move on fixed-length links and do not translate past
+their closed geometry. The displayed large gripper is retained. Its hollow
+contour is decomposed into convex collision pieces so the holes are not filled
+by a single convex hull. Opposing-jaw collisions are enabled. Frames contain
+actual simulated wrist and jaw transforms, and the renderer uses those exact
+transforms rather than a different interpolated mechanism.
 
-- The uploaded **Mk2 Plus Addons (6).stl** is a merged triangle assembly, not a
-  rigged MuJoCo URDF/MJCF: it does **not** contain joint frames, inertial tensors,
-  material friction, stepper torque curves, or independent link objects.
-- The **Mk2 Plus Addons (7).stl** consists of gripper jaw pieces, not the final
-  modified gripper's servo gear train. The full custom gripper link is still needed.
-- The 3D mesh shown on screen is the previous photo-based approximation. MuJoCo's
-  rigid geoms are authoritative for contact, but true CAD-scale visual-vs-physics
-  registration and calibration are not complete.
-- The model's 0.145 m upper link, 0.220 m forearm, 0.135 m shoulder height,
-  gripper geometry, mass estimates, torque limits and joint axes are **provisional**.
-  Real wrist/gripper axes and gripping linkage have not been measured.
-- Nominal properties such as plastic mass and friction are estimates. Real motors
-  have gearing, backlash, torque-vs-speed and power limits not reproduced yet.
-- Virtual learning performance must be **rebenchmarked** after an engine change.
-  Old policies are archived as incompatible. Success in either model cannot
-  authorize automated motion of a robot without limit switches or a kill switch.
+A closing request continues after contact. Contact resists the motion with
+bounded actuator force and soft pad constraints. This does not permit the jaws
+to pass through an object. Objects are not teleported into a successful grasp.
+The simulator advances at 1 ms integration steps, 60 per learning action.
+Zero action retains its existing target instead of chasing gravity-induced sag.
 
-## Suggested next calibration sequence
+## Check gripper
 
-1. Obtain a CAD **assembly** with individually addressable solid links and jaw
-   components, or take measured shoulder, elbow and wrist joint-axis coordinates.
-2. Measure link lengths, tip offset, actual motor ratios and two servo ranges.
-3. Measure total weight per moving link and gripper; adjust inertias and motor
-   torque limits, rather than only visual mesh vertices.
-4. Compare virtual vs hand-measured slow supervised poses on a powerless arm.
-5. Only after accurate physics and contact validation, run held-out tasks and
-   compare untrained vs trained policies before considering any hardware bridge.
+Use Open / close, Wrist turn, and Contact squeeze. These finite diagnostics fix
+only the three main arm axes. Contact squeeze uses an explicitly labeled fixed
+block to isolate the gripper. They are NOT learned grasp demonstrations.
+STOP stops displayed playback. Separate automated tests also initialize a free
+block between the jaws, hold it by contact, then release it under gravity.
+This verifies a pre-positioned grasp, not autonomous object acquisition.
+
+## Calibration limits
+
+The main arm appearance remains the earlier reconstructed assembly. Its lengths,
+linkage topology, wrist shaft direction and travel, masses, friction, gear ratios,
+servo force limits and compliance remain unmeasured estimates. The existing
+wrist shaft orientation is retained; it is not a calibrated hardware mapping.
+The nominal empty visual tip gap is 6 estimated mm and maximum gripping torque
+is 0.06 simulated Nm. Neither is a recommendation for the physical robot.
+The rear support has no independent actuator. Complete full-link self-collision,
+cable forces and physical-robot transfer are not validated.
+
+The supplied STL files have not been converted into a complete measured dynamic
+assembly in this update. No simulated success releases real-robot control.
+Old policies are archived because they were trained on a different mechanism.
+The previous API key storage is unchanged and no key is included in this release.
+Training and mechanism checks now require MuJoCo; the HTTP layer blocks them
+rather than silently using the old approximate contact engine when it is absent.

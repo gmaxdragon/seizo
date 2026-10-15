@@ -25,7 +25,7 @@ with tempfile.TemporaryDirectory() as td, (OUT/'browser_server.log').open('w') a
    def wait_js(expression,timeout=30000):
     deadline=time.monotonic()+timeout/1000
     while time.monotonic()<deadline:
-     if page.evaluate('() => ('+expression+')'):return
+     if page.evaluate('() => !!('+expression+')'):return
      page.wait_for_timeout(100)
     raise TimeoutError(expression)
    page.goto(url,wait_until='networkidle');wait_js('window.__seizo?.view?.renderer?.gl',timeout=30000)

@@ -1,6 +1,6 @@
 {
   "schema": "seizo-desktop-manifest/v1",
-  "version": "2026.10.14-contact-v3.1",
+  "version": "2026.10.14-rigidbody-v4",
   "base": {
     "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/6aba13c4b4e1990125cf5e766feaf65dc89e66e8/Seizo_Learn_Web.tar.xz",
     "sha256": "4d639563b67233f68733c57915f7c5aec4568b6a929cd3ff9e7e39112b04da28"
@@ -16,7 +16,7 @@
     },
     "core/runner.py": {
       "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/seizo-desktop/patches/core/runner.py",
-      "sha256": "aae4eabd7fb118b2f5b5295aa72ce1c5b622e7cade261cbc13d366389c1b3318"
+      "sha256": "ae37043e770b97af46b775352bbcf671f313bddaa5410569ffcfc9ce50a075df"
     },
     "web/learning_view.js": {
       "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/seizo-desktop/patches/web/learning_view.js",
@@ -24,11 +24,11 @@
     },
     "web/app.js": {
       "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/seizo-desktop/patches/web/app.js",
-      "sha256": "2084b48f9834bbbf0d7a002e00cd83befb3ea0c556a60fd2363ac4958b433099"
+      "sha256": "10a2ed6bcb0982d2fb4483498040855dec48356ea23c2d5b321c57f984920c23"
     },
     "app.py": {
       "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/seizo-desktop/patches/app.py",
-      "sha256": "9bcc750dc17978ae6953a1afa49504c79a213d22f0b4f76979ef977bbb97b4ad"
+      "sha256": "d83972ec0a058530e9810901bd52db8be5bc735d99e239be1b9128be431da0ef"
     },
     "README.md": {
       "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/seizo-desktop/patches/README.md",
@@ -49,6 +49,38 @@
     "tests/preserved_source_hashes.json": {
       "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/seizo-desktop/patches/tests/preserved_source_hashes.json",
       "sha256": "63198544ec93bd9df395202f5f942d87cd36182f31f9a076976bb830de93df67"
+    },
+    "core/mjcf.py": {
+      "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/seizo-desktop/patches/core/mjcf.py",
+      "sha256": "3c63e09acb2db0007b0a5e458874bb24d1910117b97ab62457769d4abb5ae9cd"
+    },
+    "core/mujoco_world.py": {
+      "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/seizo-desktop/patches/core/mujoco_world.py",
+      "sha256": "d020f008d6b3e88f4019b4e624bf4c367fa6ab83ec36da5886bc2b40b8533298"
+    },
+    "core/ppo.py": {
+      "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/seizo-desktop/patches/core/ppo.py",
+      "sha256": "340a2e475e166f74b13f7d945b1cfc907d2b757e7c24b4e03dee4aa8b89397ae"
+    },
+    "bootstrap.py": {
+      "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/seizo-desktop/patches/bootstrap.py",
+      "sha256": "59412d4ce47d74d963f646e47f0739ad3f3a707543bbf9eb79ce7ab5414492aa"
+    },
+    "web/index.html": {
+      "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/seizo-desktop/patches/web/index.html",
+      "sha256": "28d7e3a0255285cc3cefa48133d73148633a3cd9bcd3aa3b2b7c04a5410c3086"
+    },
+    "tests/test_mujoco_physics.py": {
+      "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/seizo-desktop/patches/tests/test_mujoco_physics.py",
+      "sha256": "04b033978e34ba1ab6aa3ba7c286be27372174725d92c33ea9d84f6378fd59ac"
+    },
+    "tests/test_mujoco_integration.py": {
+      "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/seizo-desktop/patches/tests/test_mujoco_integration.py",
+      "sha256": "d5a2868b73bf095c4bd019626851d94825ffa8400dc591b4459f18991cc6b641"
+    },
+    "PHYSICS_REALISM.md": {
+      "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/seizo-desktop/patches/PHYSICS_REALISM.md",
+      "sha256": "1546e4131519fc39fc6dd194566d268fce65e7fa9ac200f42dbb60ee0fbf6b66"
     }
   }
 }

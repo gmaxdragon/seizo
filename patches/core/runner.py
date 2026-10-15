@@ -4,7 +4,29 @@ import copy,json,os,secrets,threading,time,traceback
 from pathlib import Path
 from collections import deque
 import numpy as np
-from .world import World,TASKS,TASK_LABELS,MODEL_ID
+from . import world as _approx_world
+from .world import TASKS,TASK_LABELS
+from .mjcf import MODEL_VERSION
+
+# MuJoCo is an optional, downloaded-once CPU physics engine. A missing wheel
+# is NEVER described as full physics. Check the status.physics field to know
+# precisely which backend and joint model is active.
+_backend_preference=os.environ.get('SEIZO_PHYSICS_ENGINE','auto').strip().lower()
+if _backend_preference not in ('auto','mujoco','capsule'):
+    raise ValueError('SEIZO_PHYSICS_ENGINE must be auto, mujoco, or capsule.')
+try:
+    if _backend_preference=='capsule':raise ImportError('Fast capsule mode selected')
+    import mujoco as _mujoco
+    from .mujoco_world import MuJoCoWorld as World
+    _BACKEND_LABEL='MuJoCo full rigid body: joint inertia, force-limited motors, gravity and 3D shape contact; NOT calibrated'
+    _approx_world.MODEL_ID=MODEL_VERSION
+    MODEL_ID=MODEL_VERSION
+except ImportError:
+    if _backend_preference=='mujoco':
+        raise RuntimeError('Realistic physics requested but MuJoCo is missing. Install once with: python -m pip install mujoco')
+    World=_approx_world.World
+    MODEL_ID=_approx_world.MODEL_ID
+    _BACKEND_LABEL='Fast approximate contact solver (MuJoCo unavailable or fast mode requested)'
 from .ppo import Agent,rollout
 
 
@@ -54,13 +76,13 @@ class Runner:
                 # weights must not be silently reused or represented as valid.
                 # Keep the exact old bytes, including any best checkpoints.
                 if 'Incompatible policy.' in str(e):
-                    backup=self.folder/('legacy_collision_v2_'+time.strftime('%Y%m%d_%H%M%S'))
+                    backup=self.folder/('legacy_physics_checkpoint_'+time.strftime('%Y%m%d_%H%M%S'))
                     backup.mkdir(exist_ok=True)
                     for item in [path,*self.folder.glob('best_*.npz'),self.folder/'initial_policy.npz']:
                         if item.is_file():
                             os.replace(item,backup/item.name)
                     self.status='ready'
-                    self.error='Older pre-collision policy archived under '+backup.name+'. Training starts new.'
+                    self.error='Policy from a different physics engine archived under '+backup.name+'. New physics requires new training.'
                 else:
                     self.status='error';self.error='Saved policy was not loaded: '+str(e)
             except Exception as e:self.status='error';self.error='Saved policy was not loaded: '+str(e)
@@ -79,7 +101,7 @@ class Runner:
                 'validation':copy.deepcopy(self.validation),'evaluation':copy.deepcopy(self.last_evaluation),
                 'history':copy.deepcopy(self.history[-100:]),'stats':copy.deepcopy(self.latest_stats),
                 'initial_fingerprint':self.initial_hash,'policy_fingerprint':self.agent.signature(),'best_scores':dict(self.best_scores),
-                'physics':'collision-aware kinematic capsules for base, arm ribs, forearm, palm and jaws; gravity and contact; NOT calibrated',
+                'physics':_BACKEND_LABEL,
                 'physical_motion':False,'cloud_training_calls':0,'model_id':MODEL_ID}
 
     def save(self):
@@ -109,7 +131,7 @@ class Runner:
         return {'ok':True,'resumed':resume,'target_episodes':self.target,'algorithm':'NumPy neural PPO','physical_motion':False}
 
     def _train(self):
-        env=World(n=8,seed=int(self.agent.rng.integers(1,2**30)),task=self.config['task'],fault_probability=self.config['fault_probability'])
+        env=World(n=(2 if MODEL_ID==MODEL_VERSION else 8),seed=int(self.agent.rng.integers(1,2**30)),task=self.config['task'],fault_probability=self.config['fault_probability'])
         env.stage=self.stage;env.reset();trace=[env.frame()];last_save=time.monotonic();next_eval=self.agent.steps+40000
         try:
             if not (self.folder/'initial_policy.npz').exists():self.initial.save(self.folder/'initial_policy.npz')

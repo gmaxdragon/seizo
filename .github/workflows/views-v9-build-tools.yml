@@ -6,14 +6,15 @@ on:
 permissions:
   contents: read
 jobs:
-  tools:
+  package:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - run: python -m pip download --only-binary=:all: --no-deps --dest wheels fast-simplification
+      - run: |
+          python -m pip download --only-binary=:all: --no-deps --dest wheels fast-simplification
       - uses: actions/upload-artifact@v4
         with:
           name: seizo-views-v9-mesh-tools

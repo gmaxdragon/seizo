@@ -1,56 +1,84 @@
-# Seizo two-servo gripper correction, v5
+# Seizo v6: axial roll, real contact reporting and broader learning
 
-This is computer simulation only. No Raspberry Pi, serial/GPIO controller,
-physical-motor command path, or Railway service was changed.
+Computer simulation only. The live robot repository and PEAC/Railway are not
+modified by this release. The rendered arm remains the existing photo-based
+reconstruction. The uploaded STL assembly has not been relabeled as measured CAD.
 
-## What was wrong
+## Reproduced v5 errors
 
-The previous displayed jaw was already tapered toward its closed centerline,
-but the renderer translated it inward again. The visible tips crossed. The old
-physics model also explicitly excluded collisions between the opposing jaws.
-Wrist leveling and visible tool coordinates could disagree with physics.
+The old wrist used local Z yaw and +/-75 degree limits. A 75-degree command moved
+the tool tip about 179 estimated mm instead of rolling the hand in place.
+The old contact loop also labeled ordinary object/table contacts as arm contacts.
+Those are software defects, not evidence that the user's robot is faulty.
 
-## Corrected mechanism
+## Joint and contact corrections
 
-Five actuators total: three main arm controls, ONE wrist actuator rotating the
-whole tool, and ONE gripper actuator driving a coupled pair of jaw linkages.
-The additional linkage follower joints are passive constraints, not servos.
-The jaws remain parallel, move on fixed-length links and do not translate past
-their closed geometry. The displayed large gripper is retained. Its hollow
-contour is decomposed into convex collision pieces so the holes are not filled
-by a single convex hull. Opposing-jaw collisions are enabled. Frames contain
-actual simulated wrist and jaw transforms, and the renderer uses those exact
-transforms rather than a different interpolated mechanism.
+The new tool joint rolls around local X, from wrist toward fingertips. The tool
+site lies on that axis. Roll can pass 360 in simulation; observations use periodic
+angle information and commands remain small, rate bounded and force limited.
+This does NOT certify continuous rotation, feedback or cable clearance on the
+actual servo. There are still exactly five actuator controls: three main arm,
+one tool roll, and one coupled jaw mechanism. Passive follower joints are not
+extra motors. Gripper opening and tool roll remain separate controls.
 
-A closing request continues after contact. Contact resists the motion with
-bounded actuator force and soft pad constraints. This does not permit the jaws
-to pass through an object. Objects are not teleported into a successful grasp.
-The simulator advances at 1 ms integration steps, 60 per learning action.
-Zero action retains its existing target instead of chasing gravity-induced sag.
+MuJoCo rigid-body transforms drive the visual wrist and jaws. Contact reporting
+requires an active solver contact with positive normal force and classifies the
+actual geometry pair. Table/object, arm/object, jaw/object, arm/table and internal
+contacts are not interchangeable. A continuing squeeze is reported only when
+jaws actually touch an object and the requested opening remains smaller than the
+measured simulated opening. Opposing jaws keep their existing collision surfaces.
 
-## Check gripper
+The held-roll check PRE-POSITIONS a free block between the jaws, closes with
+bounded force, turns it and releases it under gravity. The block has no weld.
+The fixed-block squeeze check intentionally uses a fixture and labels it as such.
+Neither is AI learning or proof of successful autonomous object acquisition.
 
-Use Open / close, Wrist turn, and Contact squeeze. These finite diagnostics fix
-only the three main arm axes. Contact squeeze uses an explicitly labeled fixed
-block to isolate the gripper. They are NOT learned grasp demonstrations.
-STOP stops displayed playback. Separate automated tests also initialize a free
-block between the jaws, hold it by contact, then release it under gravity.
-This verifies a pre-positioned grasp, not autonomous object acquisition.
+## Seven task definitions, not seven mastered skills
 
-## Calibration limits
+Reach, roll/aperture positioning, push, grip/lift, lift/place, lift/rotate a held
+object, and rotate/place. The cylinder is elongated so sideways/upright placement
+is meaningful. Initial locations and orientations vary. For the last two tasks,
+success checks actual object orientation, not just the commanded wrist angle.
+Oriented placement also requires prior gripping/lifting, release and stable
+contact with the support plane. Objects are never teleported into learned grasps.
 
-The main arm appearance remains the earlier reconstructed assembly. Its lengths,
-linkage topology, wrist shaft direction and travel, masses, friction, gear ratios,
-servo force limits and compliance remain unmeasured estimates. The existing
-wrist shaft orientation is retained; it is not a calibrated hardware mapping.
-The nominal empty visual tip gap is 6 estimated mm and maximum gripping torque
-is 0.06 simulated Nm. Neither is a recommendation for the physical robot.
-The rear support has no independent actuator. Complete full-link self-collision,
-cable forces and physical-robot transfer are not validated.
+The local neural PPO controller receives 67 normalized simulation-state features,
+including object/goal rotation matrices. It starts with random weights, has dense
+programmed rewards and samples its own actions. It is not learning from images.
+Automatic lessons advance after repeated held-out validation and retain earlier
+lessons. The lesson scheduler is programmed; the action policy learns.
 
-The supplied STL files have not been converted into a complete measured dynamic
-assembly in this update. No simulated success releases real-robot control.
-Old policies are archived because they were trained on a different mechanism.
-The previous API key storage is unchanged and no key is included in this release.
-Training and mechanism checks now require MuJoCo; the HTTP layer blocks them
-rather than silently using the old approximate contact engine when it is absent.
+Test all tasks freezes weights, uses fresh paired seeds for policy/random actions,
+reports each task separately and gives a binomial uncertainty interval. Fault
+injection is scored separately, not counted as successful manipulation. Hundreds
+of successes in this environment would still not establish physical reliability.
+
+## Cloud AI and experience
+
+API tests and experience reviews are manual cloud requests, not PPO training.
+After an evaluation, the app saves a compact experience.json tied to the exact
+model and policy fingerprint. A manual cloud review sends that measured summary
+and receives bounded task-selection advice. It does not execute advice, run code,
+control motors, retrain hosted weights, upload cameras or make million-call loops.
+The UI shows API request and token counters independently from network updates.
+Credentials remain in the existing Windows account-bound vault.
+
+## Remaining limits
+
+Joint positions, torque limits, mass, friction, compliance, cable forces and the
+full custom gripper mechanics remain uncalibrated. Collision shapes are still
+simplified. The 360-degree simulation setting is not a real motor travel limit.
+No passing diagnostic or learned-policy score unlocks physical motion. Keep the
+robot's physical kill switch and local motion commissioning separate.
+
+## Primary technical sources
+
+MuJoCo joint axes, constraints and force-limited actuators:
+https://mujoco.readthedocs.io/en/3.3.7/XMLreference.html
+
+Separate training and evaluation:
+https://stable-baselines3.readthedocs.io/en/master/guide/rl_tips.html
+
+Hack Club API and permitted use:
+https://docs.ai.hackclub.com/
+https://docs.ai.hackclub.com/guide/rules.html

@@ -103,7 +103,7 @@ class CheckpointMigrationTests(unittest.TestCase):
             prior=(folder/'policy.npz').read_bytes()
             runner=Runner(folder)
             self.assertEqual(runner.status,'ready')
-            backups=list(folder.glob('legacy_collision_v2_*/policy.npz'))
+            backups=list(folder.glob('legacy_physics_checkpoint_*/policy.npz'))
             self.assertEqual(len(backups),1)
             self.assertEqual(backups[0].read_bytes(),prior)
             self.assertEqual(runner.agent.episodes,0)

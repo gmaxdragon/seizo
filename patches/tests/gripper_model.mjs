@@ -29,4 +29,13 @@ frame.rigid_bodies={wrist:Array.from(ident()),wristMount:Array.from(ident()),jaw
 frame.rigid_bodies.jawLeft[13]=57;frame.rigid_bodies.jawRight[13]=-58;
 view.show(frame);assert.equal(view.renderer.groups.jawLeft[13],57);assert.equal(view.renderer.groups.jawRight[13],-58);
 assert(!view.renderer.parts.some(p=>p.group==='mast'));
+// A local roll turns the transverse axis but preserves the tool's long axis.
+delete frame.rigid_bodies;frame.pose.gripper=.5;
+frame.pose.wrist=0;view.show(frame);const baseW=Array.from(view.renderer.groups.wrist);
+for (const deg of [90,180,270,360]) {
+ frame.pose.wrist=deg;view.show(frame);const w=view.renderer.groups.wrist;
+ for(const k of [0,1,2,12,13,14])assert(Math.abs(w[k]-baseW[k])<.001,'Roll steered or translated the shaft');
+ if(deg===90)assert(Math.abs(w[6])>.99,'90-degree roll must rotate across the tool shaft');
+}
+
 console.log(JSON.stringify({sampled_apertures:101,jaw_crossings:0,actual_body_matrices_preserved:true,red_tower:false,parts:view.renderer.parts.length}));

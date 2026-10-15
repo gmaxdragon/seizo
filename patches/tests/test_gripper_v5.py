@@ -49,7 +49,7 @@ class GripperV5(unittest.TestCase):
   self.assertLess(max(abs(f['pose']['wrist']) for f in self.open['frames']),.02)
  def test_wrist_turn_does_not_close_jaws(self):
   f=self.turn['frames'];self.assertGreater(max(x['pose']['wrist'] for x in f),34.)
-  self.assertLess(min(x['pose']['wrist'] for x in f),-34.)
+  self.assertGreater(max(x['pose']['wrist'] for x in f),359.)
   self.assertGreater(min(x['pose']['gripper'] for x in f),.995)
  def test_arm_stays_locked_only_in_diagnostic(self):
   for f in self.turn['frames']+self.open['frames']:

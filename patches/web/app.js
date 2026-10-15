@@ -3,11 +3,12 @@ const $=id=>document.getElementById(id),token=document.querySelector('meta[name=
 let view=null,status=null,play=null,epoch=0,busy=false,lastId=0,lastFrame=0,closed=false,evalSeen='';
 let controlSeq=Date.now()*1000;
 let connected=false,graphicsReady=false,graphicsFailed=false,animationStarted=false,latestFrame=null;
-const TASKS=['reach','orient','push','lift','place'];
+const TASKS=['reach','orient','push','lift','place','rotate','orient_place'];
+let suggestedLesson=null;
 async function api(path,body){
  if(body!==undefined&&['/api/start','/api/stop'].includes(path))body={...body,control_seq:++controlSeq};
  const abort=new AbortController();
- const limit=path.includes('/hackclub/test')?40000:['/api/trial','/api/gripper-check'].includes(path)?90000:15000;
+ const limit=path.includes('/hackclub/test')||path.includes('/hackclub/review')?40000:['/api/trial','/api/gripper-check'].includes(path)?90000:15000;
  const timer=setTimeout(()=>abort.abort(),limit);
  try{
   const r=await fetch(path,{method:body===undefined?'GET':'POST',headers:{'X-Lab-Token':token,...(body===undefined?{}:{'Content-Type':'application/json'})},body:body===undefined?undefined:JSON.stringify(body),cache:'no-store',signal:abort.signal});
@@ -22,9 +23,17 @@ async function api(path,body){
 }
 function say(s,error=false){$('status').textContent=s;$('status').className=error?'error':'';}
 function fail(e){say(e.message||String(e),true);}
-function task(){const s=$('task').value;return TASKS.includes(s)?s:s==='all'?TASKS[Math.floor(Math.random()*5)]:TASKS[status?.stage||0];}
-function controls(){const unavailable=!connected;const active=['training','stopping','evaluating'].includes(status?.status);$('train').disabled=unavailable||active||busy;$('watch').disabled=unavailable||!graphicsReady||active||busy;$('evaluate').disabled=unavailable||active||busy;$('task').disabled=unavailable||active||busy;$('gripperCheck').disabled=unavailable||!graphicsReady||active||busy;}
-function show(f){latestFrame=f;if(!view||!graphicsReady)return;view.show(f);const selected=f.objects[f.selected_object];let extra=f.task==='orient'?` · targets: wrist ${f.wrist_goal.toFixed(0)}°, opening ${(f.gap_goal*100).toFixed(0)}%`:['lift','place'].includes(f.task)?` · lift ${f.lift_mm.toFixed(0)} mm · ${selected.pinched?'grasped':'not grasped'}`:'';$('taskInfo').textContent=`${f.task_label} · ${selected.name} · wrist ${f.pose.wrist.toFixed(0)}° · gripper ${(f.pose.gripper*100).toFixed(0)}%${extra}${f.arm_object_contact?' · contact resists closure':''}${f.diagnostic?' · '+f.diagnostic_phase+' · NOT AI training':''}`}
+function task(){const s=$('task').value;return TASKS.includes(s)?s:s==='all'?TASKS[Math.floor(Math.random()*TASKS.length)]:TASKS[status?.stage||0];}
+function controls(){const unavailable=!connected;const active=['training','stopping','evaluating'].includes(status?.status);$('train').disabled=unavailable||active||busy;$('watch').disabled=unavailable||!graphicsReady||active||busy;$('evaluate').disabled=unavailable||active||busy;$('task').disabled=unavailable||active||busy;$('gripperCheck').disabled=unavailable||!graphicsReady||active||busy;$('reviewAI').disabled=unavailable||active||busy;}
+function show(f){
+ latestFrame=f;if(!view||!graphicsReady)return;view.show(f);
+ const selected=f.objects[f.selected_object],roll=((f.pose.wrist%360)+360)%360;
+ let touch=f.gripper_object_contact?`Finger contact${f.gripper_contact_continues?' / bounded squeeze':''}`:
+             f.contacts?.arm_object?'Arm touching an object':f.contacts?.environment?'Arm touching the table':'No finger contact';
+ let extra=['rotate','orient_place'].includes(f.task)?` · object orientation error ${f.object_orientation_error_degrees?.toFixed(0)}°`:'';
+ $('taskInfo').textContent=`${f.diagnostic?f.diagnostic_phase:f.task_label} · tool ROLL ${roll.toFixed(0)}° · opening ${(f.pose.gripper*100).toFixed(0)}% · ${touch}${extra}${f.diagnostic?' · MECHANISM CHECK, NOT LEARNING':''}`;
+}
+
 function begin(trace,label){play={trace,index:0,at:0,label,generation:epoch};show(trace.frames[0]);$('overlay').textContent=label;}
 function frame(t){
  try {
@@ -46,15 +55,28 @@ function frame(t){
 $('train').onclick=async()=>{busy=true;controls();epoch++;play=null;try{say('Starting local neural training...');await api('/api/start',{episodes:+$('episodes').value,task:$('task').value,compute:$('compute').value,fault_probability:0});lastId=0;await poll();}catch(e){fail(e)}finally{busy=false;controls()}};
 $('stop').onclick=async()=>{epoch++;play=null;say('Displayed movement stopped. Saving policy...');try{await api('/api/stop',{});await poll();}catch(e){fail(e)}};
 $('watch').onclick=async()=>{busy=true;controls();const id=++epoch;play=null;say('Running a frozen virtual-policy trial...');try{const tr=await api('/api/trial',{task:task(),source:$('source').value,fault:$('fault').checked});if(id!==epoch)return;begin(tr,tr.policy_updates?'Saved neural policy':'Untrained neural policy: random exploration');say(tr.policy_updates?'Watching learned decisions. No weights change during this test.':'Watching the untrained policy. It has not learned yet.');}catch(e){fail(e)}finally{busy=false;controls()}};
-$('evaluate').onclick=async()=>{epoch++;play=null;try{say('Testing fresh scenarios and matching random baselines...');await api('/api/evaluate',{task:$('task').value==='all'?'all':task()});await poll()}catch(e){fail(e)}};
+$('evaluate').onclick=async()=>{epoch++;play=null;try{say('Testing ALL seven tasks and paired random baselines. No cloud calls or weight updates.');await api('/api/evaluate',{task:'all',trials:+$('evalTrials').value});await poll()}catch(e){fail(e)}};
 let polling=false;
-async function poll(){if(polling||closed)return;polling=true;try{status=await api('/api/status');connected=true;$('connection').textContent='Local app connected · '+location.host;$('connection').className='online';let s=status;const nf=n=>Number(n).toLocaleString();$('physicsBadge').textContent='Physics: '+s.physics;$('progress').textContent=`${nf(s.episodes)} / ${nf(s.target_episodes)} completed episodes · ${nf(s.moves)} movements · ${nf(s.updates)} network updates`;$('bar').max=s.target_episodes;$('bar').value=s.episodes;
+async function poll(){if(polling||closed)return;polling=true;try{status=await api('/api/status');connected=true;$('connection').textContent='Local app connected · '+location.host;$('connection').className='online';let s=status;const nf=n=>Number(n).toLocaleString();$('physicsBadge').textContent=s.build+' · '+s.physics;$('progress').textContent=`${nf(s.episodes)} / ${nf(s.target_episodes)} completed episodes · ${nf(s.moves)} movements · ${nf(s.updates)} network updates`;$('bar').max=s.target_episodes;$('bar').value=s.episodes;
  if(s.status==='training'){say(`Learning: ${s.lesson}. ${s.episodes<1?'Exploring before the first completed episode.':''}`);let tr=s.trace;if(graphicsReady&&!play&&tr&&tr.id!==lastId){lastId=tr.id;begin(tr,`Training exploration from episode ${nf(tr.episode)}`);}let eta=s.estimated_seconds_remaining;$('outcome').textContent=`Showing a sampled trial, not every background movement. ${eta?`At the measured rate, remaining budget is about ${Math.ceil(eta/3600)} hours (rough estimate).`:''}`;}
  else if(s.status==='stopping')say('Stopped. Finishing the current update and saving...');
- else if(s.status==='evaluating')say('Evaluating without changing the policy. Training counters stay unchanged.');
+ else if(s.status==='evaluating')say(`Frozen evaluation: ${s.evaluation_progress?.phase||'starting'} · ${s.evaluation_progress?.completed||0}/${s.evaluation_progress?.total||7} tasks. No learning or API calls.`);
  else if(s.status==='error')say(s.error,true);
  else if(!play&&!busy)say(s.updates?`Saved. ${nf(s.updates)} neural updates completed. Choose Watch policy or Check progress.`:'Ready. The policy starts untrained. Watch it first, then Train / resume.');
- if(s.evaluation&&JSON.stringify(s.evaluation)!==evalSeen){evalSeen=JSON.stringify(s.evaluation);let a=s.evaluation.current,b=s.evaluation.random_actions;$('evaluation').textContent=s.evaluation.by_task?s.evaluation.by_task.map(r=>`${r.current.task}: policy ${r.current.successes}/${r.current.trials}, random ${r.random_actions.successes}/${r.random_actions.trials}`).join(' · '):`Fresh ${a.task} test: learned policy ${a.successes}/${a.trials}; random actions ${b.successes}/${b.trials}. Mean error ${a.mean_error_mm.toFixed(1)} mm versus ${b.mean_error_mm.toFixed(1)} mm (estimated simulation units).`;}
+ $('learningEvidence').textContent=`Learning evidence: ${nf(s.parameters_changed_from_initial||0)} parameter values differ from the initial network. ${s.weights_changed_from_initial?'Weights changed; evaluation determines whether performance improved.':'No learned weight change yet.'}`;
+ const usage=s.cloud?.api_usage;
+ if(usage)$('apiActivity').textContent=`API: ${usage.attempts} request attempts · ${usage.successful_responses} accepted responses · ${usage.total_tokens} reported tokens. Last: ${usage.last?.purpose||'none'}. Training uses 0 API calls.`;
+ if(s.evaluation&&JSON.stringify(s.evaluation)!==evalSeen){
+  evalSeen=JSON.stringify(s.evaluation);const e=s.evaluation,box=$('evaluation');box.replaceChildren();
+  const heading=document.createElement('p');heading.textContent=`Frozen test complete: ${e.current.successes}/${e.current.trials} successful tasks. Failures are kept. Weights unchanged: ${e.fingerprint_unchanged}.`;box.append(heading);
+  const table=document.createElement('table');const head=document.createElement('tr');
+  for(const text of ['Task','Policy success','Random success','95% interval']){let cell=document.createElement('th');cell.textContent=text;head.append(cell)}table.append(head);
+  for(const r of e.by_task||[]){const tr=document.createElement('tr'),c=r.current,ci=c.success_interval_95;
+   for(const text of [c.task,`${c.successes}/${c.trials}`,`${r.random_actions.successes}/${r.random_actions.trials}`,ci?`${(100*ci[0]).toFixed(0)}–${(100*ci[1]).toFixed(0)}%`:'']){let td=document.createElement('td');td.textContent=text;tr.append(td)}table.append(tr);
+  }box.append(table);
+  if(e.fault_test){let p=document.createElement('p');p.textContent=`Separate fault exercise: ${e.fault_test.faults}/${e.fault_test.trials} fault aborts. These are not counted as task successes.`;box.append(p)}
+ }
+
  controls();}catch(e){connected=false;$('connection').textContent=e.message;$('connection').className='error';controls();}finally{polling=false}}
 
 $('gripperCheck').onclick=async()=>{
@@ -69,6 +91,16 @@ $('gripperCheck').onclick=async()=>{
  }catch(e){fail(e)}finally{busy=false;controls()}
 };
 
+$('reviewAI').onclick=async()=>{
+ busy=true;controls();$('aiAdvice').textContent='Sending your measured evaluation summary to Hack Club AI. One manual request.';
+ try{const r=await api('/api/hackclub/review',{model:$('keyModel').value});suggestedLesson=r.advice.next_task;
+  $('aiAdvice').textContent=`${r.advice.summary} Suggested lesson: ${suggestedLesson}. ${r.advice.reason} This is context-based advice, not cloud model training.`;
+  $('useAdvice').hidden=false;await poll();
+ }catch(e){$('aiAdvice').textContent=e.message}finally{busy=false;controls()}
+};
+$('useAdvice').onclick=()=>{if(TASKS.includes(suggestedLesson)&&!['training','evaluating','stopping'].includes(status?.status)){
+ $('task').value=suggestedLesson;say('Lesson selected. Press Train / resume when ready. No hardware control.');
+}};
 $('task').onchange=()=>{epoch++;play=null;$('outcome').textContent='Choose Watch policy to test this task.'};
 $('settingsOpen').onclick=()=>$('settings').showModal();$('settingsClose').onclick=()=>$('settings').close();$('fit').onclick=()=>view?.fit();
 $('reset').onclick=async()=>{if(!confirm('Back up this policy and start a completely untrained one? Stop training first.'))return;try{epoch++;play=null;await api('/api/reset',{confirmed:true});evalSeen='';$('evaluation').textContent='';await poll();$('settings').close()}catch(e){fail(e)}};

@@ -16,7 +16,21 @@ from .gripper_geometry import SPEC as GRIPPER, MAX_ANGLE, aperture_mm
 
 RAD=np.pi/180.
 DEG=180./np.pi
-OBJECT_RADII=np.array([12.,13.,13.])
+OBJECT_RADII=np.array([12.,12.,13.])
+OBJECT_HALFHEIGHT=np.array([12.,30.,13.])
+
+def rx(a):
+    c,s=math.cos(a),math.sin(a)
+    return np.array([[1.,0.,0.],[0.,c,-s],[0.,s,c]])
+
+def rz(a):
+    c,s=math.cos(a),math.sin(a)
+    return np.array([[c,-s,0.],[s,c,0.],[0.,0.,1.]])
+
+def rotation_error(a,b):
+    value=(np.einsum('nij,nij->n',a,b)-1.)*.5
+    return np.arccos(np.clip(value,-1.,1.))*DEG
+
 
 
 class MuJoCoWorld(base.World):
@@ -26,6 +40,13 @@ class MuJoCoWorld(base.World):
     def __init__(self,n=1,seed=41,task='reach',fault_probability=0.0,xml_text=None):
         self._physics_ready=False
         self.tcp=np.zeros((int(n),3))
+        self.object_rotations=np.tile(np.eye(3),(int(n),3,1,1))
+        self.goal_rotation=np.tile(np.eye(3),(int(n),1,1))
+        self.object_angular_vel=np.zeros((int(n),3,3))
+        self.ever_gripped=np.zeros(int(n),bool)
+        self.episode_done=np.zeros(int(n),bool)
+        self.contacts=[{} for _ in range(int(n))]
+        self.physics_failures=np.zeros(int(n),bool)
         super().__init__(n=n,seed=seed,task=task,fault_probability=fault_probability)
         self.model=mujoco.MjModel.from_xml_string(xml_model() if xml_text is None else xml_text)
         self.data=[mujoco.MjData(self.model) for _ in range(self.n)]
@@ -37,6 +58,10 @@ class MuJoCoWorld(base.World):
         self.objadr=np.array([self.model.jnt_qposadr[self.model.joint('free_'+color).id] for color in ('red','green','blue')])
         self.objvadr=np.array([self.model.jnt_dofadr[self.model.joint('free_'+color).id] for color in ('red','green','blue')])
         self.tcp=np.zeros((self.n,3))
+        self.object_gid_map={self.gid[name]:j for j,name in enumerate(OBJECT_GEOMS)}
+        self.left_geoms={i for i in range(self.model.ngeom) if (self.model.geom(i).name or '').startswith('left_jaw_')}
+        self.right_geoms={i for i in range(self.model.ngeom) if (self.model.geom(i).name or '').startswith('right_jaw_')}
+        self.robot_bodies={i for i in range(1,self.model.nbody) if self.model.body(i).name not in OBJECT_NAMES}
         self._physics_ready=True
         self.reset()
 
@@ -75,6 +100,8 @@ class MuJoCoWorld(base.World):
             for j,bname in enumerate(OBJECT_NAMES):
                 self.objects[i,j]=d.xpos[self.bid[bname]]*1000.
                 self.ov[i,j]=d.qvel[self.objvadr[j]:self.objvadr[j]+3]*1000.
+                self.object_angular_vel[i,j]=d.qvel[self.objvadr[j]+3:self.objvadr[j]+6]
+                self.object_rotations[i,j]=d.xmat[self.bid[bname]].reshape(3,3)
             self.tcp[i]=d.site_xpos[self.sid]*1000.
 
     def reset(self,ids=None):
@@ -85,7 +112,7 @@ class MuJoCoWorld(base.World):
             d=self.data[int(i)];m=self.model
             mujoco.mj_resetData(m,d)
             self.radius[i]=OBJECT_RADII
-            self.objects[i,:,2]=base.FLOOR+OBJECT_RADII
+            self.objects[i,:,2]=base.FLOOR+OBJECT_HALFHEIGHT
             self.mass[i]=np.array([m.body_mass[self.bid[n]] for n in OBJECT_NAMES])
             self.friction[i]=.95
             self._set_pose(d,self.q[i])
@@ -108,21 +135,91 @@ class MuJoCoWorld(base.World):
             else:
                 # A reachable initial object at the pad/fingers, deliberately ungrasped.
                 self.objects[i,chosen,:2]=tcp[:2]+self.rng.uniform(-9,9,2)
-                self.objects[i,chosen,2]=base.FLOOR+self.radius[i,chosen]
+                self.objects[i,chosen,2]=base.FLOOR+OBJECT_HALFHEIGHT[chosen]
                 delta=self.rng.uniform(-np.pi,np.pi)
                 shift=self.rng.uniform(40.,65.)
                 self.goal[i]=self.objects[i,chosen]+[math.cos(delta)*shift,math.sin(delta)*shift,0.]
                 if task==3:self.goal[i]=self.objects[i,chosen]+[0.,0.,70.]
+            # Rotation lessons use a box or bottle-shaped cylinder, not a sphere
+            # whose orientation would be ambiguous. Nothing is attached at reset.
+            self.object_rotations[i]=np.eye(3)
+            if task>=5:
+                chosen=int(self.rng.integers(0,2));self.target_obj[i]=chosen
+                angle=float(self.rng.choice([0.,90.,-90.]))*RAD
+                self.object_rotations[i,chosen]=rz(self.q[i,0]*RAD)@rx(angle)
+                self.wrist_goal[i]=float(angle*DEG + self.rng.choice([-90.,90.]))
+                self.goal_rotation[i]=rz(self.q[i,0]*RAD)@rx(self.wrist_goal[i]*RAD)
+                self.objects[i,chosen,:2]=tcp[:2]+self.rng.uniform(-6,6,2)
+                self.objects[i,chosen,2]=base.FLOOR+self.support_height(i,chosen)
+                if task==5:
+                    self.goal[i]=self.objects[i,chosen]+[0.,0.,55.]
+                else:
+                    self.goal[i]=self.objects[i,chosen]+[self.rng.uniform(-35.,35.),self.rng.uniform(-35.,35.),0.]
+            else:
+                self.goal_rotation[i]=rz(self.q[i,0]*RAD)@rx(self.wrist_goal[i]*RAD)
             for j in range(3):
                 adr=self.objadr[j]
                 d.qpos[adr:adr+3]=self.objects[i,j]/1000.
-                d.qpos[adr+3:adr+7]=[1,0,0,0]
+                mujoco.mju_mat2Quat(d.qpos[adr+3:adr+7],self.object_rotations[i,j].reshape(-1))
             d.qvel[:]=0
             self._set_pose(d,self.q[i]);mujoco.mj_forward(m,d)
             self._copy_from_physics((i,))
-            self.pinched[i]=False
+            self.pinched[i]=False;self.ever_gripped[i]=False;self.episode_done[i]=False;self.physics_failures[i]=False
+            self.contacts[i]={'arm_object':False,'jaw_object':False,'environment':False,'self':False,'pairs':[],'jaw_force_n':0.}
             self.previous_tcp[i]=self.tcp[i]
         self.previous_phi[ids]=self.metrics()[0][ids]
+
+    def support_height(self,i,j):
+        """Actual shape half-height above its lowest point, estimated millimetres."""
+        r=self.object_rotations[i,j]
+        if j==0:return 12.*float(np.abs(r[2]).sum())
+        if j==1:
+            c=abs(float(r[2,2]));return 30.*c+12.*math.sqrt(max(0.,1.-c*c))
+        return 13.
+
+    def floor_clearance(self):
+        return np.array([self.objects[i,j,2]-base.FLOOR-self.support_height(i,j)
+                         for i,j in enumerate(self.target_obj)])
+
+    def contact_state(self,i):
+        """Only positive-force, solver-active contacts are evidence of touch.
+        Table/object, arm/object, finger/object and robot/environment are distinct.
+        """
+        d=self.data[i];m=self.model
+        state={'arm_object':False,'jaw_object':False,'environment':False,'self':False,
+               'pairs':[],'jaw_force_n':0.,'floor_object_count':0}
+        fingers=np.zeros((3,2),bool)
+        for k,c in enumerate(d.contact[:d.ncon]):
+            if c.efc_address<0:continue
+            force=np.zeros(6);mujoco.mj_contactForce(m,d,k,force)
+            if not np.isfinite(force).all() or force[0]<=1e-4:continue
+            g1,g2=int(c.geom1),int(c.geom2)
+            o1,o2=self.object_gid_map.get(g1),self.object_gid_map.get(g2)
+            b1,b2=int(m.geom_bodyid[g1]),int(m.geom_bodyid[g2])
+            robot1,robot2=b1 in self.robot_bodies,b2 in self.robot_bodies
+            j=o1 if o1 is not None else o2
+            if j is not None:
+                other=g2 if o1 is not None else g1
+                if int(m.geom_bodyid[other]) in self.robot_bodies:
+                    state['arm_object']=True
+                    jaw=other in self.left_geoms or other in self.right_geoms
+                    if other in self.left_geoms:fingers[j,0]=True
+                    if other in self.right_geoms:fingers[j,1]=True
+                    if jaw:state['jaw_object']=True;state['jaw_force_n']+=float(force[0])
+                    category='jaw-object' if jaw else 'arm-object'
+                elif m.geom(other).name=='desk':
+                    state['floor_object_count']+=1;continue
+                else:continue
+            elif robot1 and robot2:
+                state['self']=True;category='robot-self'
+            elif robot1 or robot2:
+                state['environment']=True;category='robot-environment'
+            else:continue
+            state['pairs'].append({'a':m.geom(g1).name,'b':m.geom(g2).name,'kind':category,
+                                  'normal_n':round(float(force[0]),6),'penetration_mm':round(max(0.,-float(c.dist)*1000.),6)})
+        state['pairs']=state['pairs'][:32]
+        self.pinched[i]=np.all(fingers,axis=1);self.last_contact[i]=state['arm_object'];self.contacts[i]=state
+        return state
 
     def metrics(self):
         # MuJoCo site, not an idealized kinematic tip, determines success.
@@ -134,7 +231,7 @@ class MuJoCoWorld(base.World):
         distance=np.linalg.norm(tcp-self.goal,axis=1)
         reach=np.linalg.norm(tcp-obj,axis=1)
         objgoal=np.linalg.norm(obj-self.goal,axis=1)
-        lift=np.maximum(0.,obj[:,2]-base.FLOOR-rad)
+        lift=np.maximum(0.,self.floor_clearance())
         werr=np.abs(base.angular_error(self.q[:,3],self.wrist_goal))
         gerr=np.abs(self.q[:,4]-self.gap_goal)
         phi=-distance/80.
@@ -149,20 +246,33 @@ class MuJoCoWorld(base.World):
         phi=np.where(self.task==3,-reach/65.+near*closure*.6+held*.6+np.minimum(lift/70.,1.2)*2.,phi)
         phi=np.where(self.task==4,-reach/90.+near*closure*.4+held*.3+np.minimum(lift/55.,1.)+
                      self.ever_lifted*(1.5-np.minimum(objgoal/70.,3.)),phi)
+        angle_error=rotation_error(self.object_rotations[idx,self.target_obj],self.goal_rotation)
+        # Reward object orientation, not merely a turned empty hand. No scripted
+        # actions, welding, grasp teleportation, or successful-trial substitution.
+        rotate_phi=-reach/75.+held*.5+np.minimum(lift/40.,1.)+self.ever_gripped*(1.-angle_error/90.)
+        place_phi=rotate_phi+self.ever_lifted*(1.-np.minimum(objgoal/70.,3.))
+        phi=np.where(self.task==5,rotate_phi,phi)
+        phi=np.where(self.task==6,place_phi,phi)
         success=distance<18.
         success=np.where(self.task==1,(distance<22.)&(werr<12.)&(gerr<.12),success)
-        success=np.where(self.task==2,(objgoal<18.)&(np.abs(obj[:,2]-base.FLOOR-rad)<8.),success)
+        success=np.where(self.task==2,(objgoal<18.)&(np.abs(self.floor_clearance())<8.),success)
         success=np.where(self.task==3,(lift>60.)&held,success)
         success=np.where(self.task==4,self.ever_lifted&(np.linalg.norm(obj[:,:2]-self.goal[:,:2],axis=1)<20.)&
-                         (np.abs(obj[:,2]-base.FLOOR-rad)<6.)&(~held)&(np.linalg.norm(self.ov[idx,self.target_obj],axis=1)<40.),success)
-        return phi,success,dict(distance=distance,object_distance=objgoal,lift=lift,wrist_error=werr,grip=held)
+                         (np.abs(self.floor_clearance())<6.)&(~held)&(np.linalg.norm(self.ov[idx,self.target_obj],axis=1)<40.),success)
+        slow=(np.linalg.norm(self.ov[idx,self.target_obj],axis=1)<25.)&(np.linalg.norm(self.object_angular_vel[idx,self.target_obj],axis=1)<.8)
+        success=np.where(self.task==5,(lift>25.)&held&(angle_error<12.),success)
+        success=np.where(self.task==6,self.ever_lifted&self.ever_gripped&(np.linalg.norm(obj[:,:2]-self.goal[:,:2],axis=1)<20.)&
+                         (np.abs(self.floor_clearance())<6.)&(~held)&slow&(angle_error<12.),success)
+        return phi,success,dict(distance=distance,object_distance=objgoal,lift=lift,wrist_error=werr,grip=held,object_angle_error=angle_error)
 
     def observation(self):
         tcp=self.tcp
         idx=np.arange(self.n);obj=self.objects[idx,self.target_obj]
-        onehot=np.eye(5)[self.task]
+        onehot=np.eye(len(base.TASKS))[self.task]
+        normalized_q=(self.q-base.LOW)/(base.HIGH-base.LOW)*2.-1.
+        normalized_q[:,3]=base.angular_error(self.q[:,3],0.)/180.
         raw=np.concatenate([
-            (self.q-base.LOW)/(base.HIGH-base.LOW)*2.-1.,
+            normalized_q,
             self.v/np.array([65.,65.,65.,140.,3.]),
             tcp/500.,(self.goal-tcp)/250.,(obj-tcp)/180.,(self.goal-obj)/180.,
             self.ov[idx,self.target_obj]/500.,
@@ -175,6 +285,10 @@ class MuJoCoWorld(base.World):
             self.ever_lifted[:,None].astype(float),
             (self.objects[:,:,:2]-tcp[:,None,:2]).reshape(self.n,6)/250.,
             self.count[:,None]/220.,self.last_action[:,3:5],
+            self.object_rotations[idx,self.target_obj,:,:2].reshape(self.n,6),
+            self.goal_rotation[:,:,:2].reshape(self.n,6),
+            self.object_angular_vel[idx,self.target_obj]/10.,
+            self.ever_gripped[:,None].astype(float),
         ],axis=1)
         assert raw.shape==(self.n,base.OBS_SIZE),raw.shape
         return np.clip(raw,-5.,5.).astype(np.float32)
@@ -183,13 +297,19 @@ class MuJoCoWorld(base.World):
         a=np.asarray(actions,dtype=float)
         if a.shape!=(self.n,5) or not np.isfinite(a).all():raise ValueError('Five finite simulation controls required.')
         a=np.clip(a,-1.,1.)
-        self.last_action=a.copy();self.count+=1
+        active=~self.episode_done
+        a=np.where(active[:,None],a,0.)
+        self.last_action=a.copy();self.count+=active.astype(int)
         requested=np.clip(self.targetq+a*base.DELTA,base.LOW,base.HIGH)
+        # Full axial roll is periodic in simulation. Bound incremental commands
+        # and maximum following error instead of falsely limiting travel to 150 deg.
+        requested[:,3]=np.clip(self.targetq[:,3]+a[:,3]*base.DELTA[3],self.q[:,3]-60.,self.q[:,3]+60.)
+        requested=np.where(active[:,None],requested,self.targetq)
         self.targetq=requested.copy()
         triggered=self.count==self.fault_at
         self.last_contact[:]=False
         for i,d in enumerate(self.data):
-            if triggered[i]:continue
+            if triggered[i] or not active[i]:continue
             self._command(d,requested[i])
             try:
                 for _ in range(SUBSTEPS):mujoco.mj_step(self.model,d)
@@ -197,23 +317,12 @@ class MuJoCoWorld(base.World):
                 raise RuntimeError('MuJoCo failed to integrate a virtual step.') from e
             # Refresh derived body transforms at the final integrated pose.
             mujoco.mj_forward(self.model,d)
-            ids={self.gid[n]:j for j,n in enumerate(OBJECT_GEOMS)}
-            left={g for g in range(self.model.ngeom) if (mujoco.mj_id2name(self.model,mujoco.mjtObj.mjOBJ_GEOM,g) or '').startswith('left_jaw_')}
-            right={g for g in range(self.model.ngeom) if (mujoco.mj_id2name(self.model,mujoco.mjtObj.mjOBJ_GEOM,g) or '').startswith('right_jaw_')}
-            fingers=np.zeros((3,2),bool)
-            for c in d.contact[:d.ncon]:
-                g1=int(c.geom1);g2=int(c.geom2)
-                j=ids.get(g1,ids.get(g2))
-                if j is None:continue
-                other=g2 if g1 in ids else g1
-                if other in left:fingers[j,0]=True
-                if other in right:fingers[j,1]=True
-                if other not in ids:self.last_contact[i]=True
-            self.pinched[i]=np.all(fingers,axis=1)
+            self.contact_state(i)
         self._copy_from_physics(range(self.n))
         self.contact_steps+=self.last_contact.astype(int)
         idx=np.arange(self.n)
-        lift=self.objects[idx,self.target_obj,2]-base.FLOOR-self.radius[idx,self.target_obj]
+        lift=self.floor_clearance()
+        self.ever_gripped|=self.pinched[idx,self.target_obj]
         self.ever_lifted|=lift>50.
         phi,success,metrics=self.metrics()
         self.dwell=np.where(success,self.dwell+1,0)
@@ -222,14 +331,17 @@ class MuJoCoWorld(base.World):
                             np.isclose(self.q[:,:3],base.HIGH[:3],atol=.1),axis=1)
         reward=np.clip(2*(phi-self.previous_phi),-3.,3.)-.015-.002*np.sum(a*a,1)-self.blocked*.06+success*5.
         reward=np.where(triggered,-.4,reward)
+        reward=np.where(active,reward,0.)
         self.previous_phi=phi;self.returns+=reward
         fallen=((self.objects[idx,self.target_obj,2]<-50.)|
                 (np.linalg.norm(self.objects[idx,self.target_obj,:2],axis=1)>850.))
-        terminated=success|triggered|fallen
+        self.physics_failures|=~np.isfinite(self.q).all(axis=1)|~np.isfinite(self.objects).all(axis=(1,2))
+        terminated=success|triggered|fallen|self.physics_failures
         truncated=(self.count>=220)&(~terminated)
+        self.episode_done|=terminated|truncated
         info=dict(success=success,fault=triggered,fallen=fallen,blocked=self.blocked,
                   **{'return':self.returns.copy(),'steps':self.count.copy(),'task':self.task.copy()},
-                  collision=self.last_contact.copy(),contacts_total=self.contact_steps.copy(),**metrics)
+                  collision=self.last_contact.copy(),contacts_total=self.contact_steps.copy(),invalid_physics=self.physics_failures.copy(),**metrics)
         return self.observation(),reward.astype(np.float32),terminated,truncated,info
 
     def frame(self,i=0):
@@ -251,10 +363,22 @@ class MuJoCoWorld(base.World):
         frame['gripper_force_limit_nm']=float(model.actuator_forcerange[self.aid['motor_gripper'],1])
         frame['gripper_requested_opening']=float(self.targetq[i,4])
         frame['gripper_gap_mm']=float(aperture_mm(self.q[i,4]))
-        frame['gripper_contact_continues']=True
+        state=self.contact_state(i)
+        frame['contacts']=state
+        frame['gripper_contact_continues']=bool(state['jaw_object'] and self.targetq[i,4]<self.q[i,4]-.01)
+        frame['gripper_object_contact']=bool(state['jaw_object'])
+        frame['roll_degrees']=float(self.q[i,3])
+        frame['roll_modulo_degrees']=float(self.q[i,3]%360.)
+        frame['roll_axis']='longitudinal: wrist toward fingertips'
+        frame['object_orientation_error_degrees']=float(self.metrics()[2]['object_angle_error'][i])
+        qtarget=np.zeros(4);mujoco.mju_mat2Quat(qtarget,self.goal_rotation[i].reshape(-1))
+        frame['target_orientation_wxyz']=qtarget.tolist()
         frame['tool_servo_count']=2
         for k,name in enumerate(OBJECT_NAMES):
             frame['objects'][k]['quaternion_wxyz']=d.xquat[self.bid[name]].tolist()
+            frame['objects'][k]['radius']=float(OBJECT_RADII[k])
+            frame['objects'][k]['half_height']=float(OBJECT_HALFHEIGHT[k])
+            frame['objects'][k]['contact_from_jaws']=bool(self.pinched[i,k])
         
         frame['object_contact']=bool(self.last_contact[i])
         frame['arm_object_contact']=bool(self.last_contact[i])

@@ -86,7 +86,7 @@ def prepare_rigid_body_engine(python):
     """Install the free CPU physics engine once. Never delete saved weights.
 
     No physical robot drivers are installed or enabled. An unavailable wheel
-    leaves the explicitly labeled fast-approximation backend available.
+    leaves viewing available but blocks realistic training/checks in the HTTP API.
     """
     if os.environ.get('SEIZO_PHYSICS_ENGINE','auto').lower()=='capsule':
         report('Fast approximate physics explicitly selected.');return
@@ -98,14 +98,14 @@ def prepare_rigid_body_engine(python):
     except (OSError,subprocess.TimeoutExpired):pass
     failed_flag=ROOT/'data'/'mujoco_install_failed.txt'
     if failed_flag.exists() and os.environ.get('SEIZO_RETRY_PHYSICS_INSTALL')!='1':
-        report('MuJoCo was previously unavailable. Using clearly marked approximate mode. Set SEIZO_RETRY_PHYSICS_INSTALL=1 to retry.');return
+        report('MuJoCo was previously unavailable. Training is blocked. Set SEIZO_RETRY_PHYSICS_INSTALL=1 to retry.');return
     report('One-time setup: installing free MuJoCo rigid-body physics; this may take a few minutes.')
     result=run_logged([python,'-m','pip','install','--disable-pip-version-check','--only-binary=:all:',
-                       '--retries','1','--timeout','30','mujoco>=3.3,<4'])
+                       '--retries','1','--timeout','30','mujoco==3.3.7'])
     if result:
         failed_flag.parent.mkdir(exist_ok=True,parents=True)
         failed_flag.write_text('MuJoCo install failed. Use SEIZO_RETRY_PHYSICS_INSTALL=1 to retry.\n',encoding='utf-8')
-        report('MuJoCo install did not succeed. Starting clearly labeled approximate mode.');return
+        report('MuJoCo install did not succeed. Training will remain blocked until MuJoCo installs.');return
     failed_flag.unlink(missing_ok=True)
     report('Realistic MuJoCo physics installed. No external AI inference needed for training.')
 

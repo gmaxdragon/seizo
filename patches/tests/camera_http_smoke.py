@@ -33,7 +33,7 @@ with tempfile.TemporaryDirectory() as t:
         call(url,token,'/api/start',{'control_seq':1,'episodes':1000,'task':'reach','compute':'fast'})
         time.sleep(1.5)
         active=call(url,token,'/api/initial')
-        assert active['observation_mode']=='two_rgb_cameras'
+        assert active['observation_mode']=='masked_rgb_views'
         call(url,token,'/api/stop',{'control_seq':2})
         for _ in range(200):
             s=call(url,token,'/api/status')

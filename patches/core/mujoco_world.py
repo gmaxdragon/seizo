@@ -49,7 +49,7 @@ class MuJoCoWorld(base.World):
         self.contacts=[{} for _ in range(int(n))]
         self.physics_failures=np.zeros(int(n),bool)
         super().__init__(n=n,seed=seed,task=task,fault_probability=fault_probability)
-        self.model=mujoco.MjModel.from_xml_string(xml_model() if xml_text is None else xml_text)
+        self.model=self._compile_model(xml_model() if xml_text is None else xml_text)
         self.data=[mujoco.MjData(self.model) for _ in range(self.n)]
         self.jid={name:mujoco.mj_name2id(self.model,mujoco.mjtObj.mjOBJ_JOINT,name) for name in JOINT_NAMES}
         self.aid={name:mujoco.mj_name2id(self.model,mujoco.mjtObj.mjOBJ_ACTUATOR,name) for name in ACTUATOR_NAMES}
@@ -65,6 +65,9 @@ class MuJoCoWorld(base.World):
         self.robot_bodies={i for i in range(1,self.model.nbody) if self.model.body(i).name not in OBJECT_NAMES}
         self._physics_ready=True
         self.reset()
+
+    def _compile_model(self,xml):
+        return mujoco.MjModel.from_xml_string(xml)
 
     def _prepare_environment(self,i):
         self.model.geom_pos[self.model.geom('desk').id,2]=self.floor_heights[i]/1000.

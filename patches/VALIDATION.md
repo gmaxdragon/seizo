@@ -1,20 +1,36 @@
-# Simulated-camera production integration
+# Seizo v9: detailed simulated views and bounded exploratory learning
 
-This release is delivered by the existing START_SEIZO.bat desktop manifest.
-It does not require a separate folder or real-camera connection.
+The current release is 2026.10.15-views-exploration-v9. Use the existing START_SEIZO.bat.
+The runtime is simulation only. No physical motor interface or automatic cloud request.
 
-Run tests with MuJoCo 3.3.7 and NumPy. Linux headless rendering may use MUJOCO_GL=egl.
-- python -m unittest discover -s tests -p 'test_*.py' -v
-- python tests/camera_http_smoke.py
-- python tests/browser_camera_v8.py
+The learner starts with random weights in data/camera_views_v9. Previous state and
+camera checkpoints are preserved, not relabeled as trained on the new observations.
+Both actor and critic see current and previous RGB from wrist, overhead and optional
+side/front helpers, plus known task instructions and previous requested actions.
+There is no hidden joint/object position, camera pose, depth or contact input.
+The 384x288 visual renders use the shipped detailed arm meshes and procedural room
+materials; they are not real Pi frames, photographs, or calibrated camera geometry.
+Each neural camera image is average-pooled to 48x36 for CPU processing.
 
-Production app.default_runner always selects CameraWorld and CameraAgent. Both training
-and frozen evaluation consume the same two simulated RGB streams. Exact state is used
-only for simulation, reward/evaluation and the fixed rejection guard. No saved state
-policy is imported as a vision policy. Keys and checkpoints are never source assets.
+Automatic view stages start with helpers, then fade them, then restrict to two.
+Transitions need two qualifying held-out checks using only wrist and overhead,
+20 trials per check, at least 70 percent success and no invalid-physics results.
+All scored evaluation runs use only those two mounted views, even during helper
+practice. A lesson name, completed counter or optimizer update is not mastery.
 
-Image-input training integration and frozen tests are not proof of learned manipulation.
-The model receives fixed average-pooled camera images and has no pretrained visual
-encoder. All physical geometry, masses, camera ranges and collision safety are provisional.
-The visual camera feeds use simplified physics geometry rather than the detailed human
-viewer. Real Pi input and physical actuator output are absent.
+A temporary discovery reward requires new actual movement/roll/opening cells.
+Repeated cells within an attempt get no new credit. The bonus is capped at 0.5
+per attempt and fades away by 500 completed episodes. Invalid states get no bonus.
+Rewards may use simulator state; that state is never fed to the neural policy.
+No scripted reaching/pickup teacher or pretrained solution is included.
+
+Safety guards, estimated 7 mm tabs, coupled gripper and longitudinal roll remain.
+Visual meshes do not turn the provisional physics into a measured hardware twin.
+
+Release validation uses the dedicated Views v9 workflow, including native Windows
+software OpenGL, Linux EGL, core/regression tests and a real browser workflow.
+The browser checks four images, focus switching, helper masking, training, STOP/save,
+reloading and cancellation of a scored evaluation. It does not claim that a full
+seven-task skill suite succeeded. Short network-update tests are not evidence of
+useful reaching, gripping or deployment readiness. Actual laptop/GPU and real robot
+performance remain unverified. Existing legacy repository CI is a separate workflow.

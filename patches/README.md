@@ -1,39 +1,42 @@
-SEIZO: SIMULATED CAMERA LEARNING IN YOUR EXISTING UPDATER
-Release: 2026.10.14-camera-learning-v8.1
-Screen: seizo-camera-learning-v8.1
+SEIZO: DETAILED CAMERA VIEWS AND EXPLORATION v9
+Release: 2026.10.15-views-exploration-v9
+Screen: seizo-detailed-views-v9
 
-NO NEW FOLDER OR SECOND APP.
-1. STOP & save your current run. Wait until saved and idle before closing its terminal.
-2. Reopen your usual START_SEIZO.bat with internet to fetch the update.
-3. The main page shows "AI input: simulated overhead + wrist cameras".
-4. Train / resume updates the local neural network from the two rendered RGB views.
-5. Watch policy and Test all tasks use the SAME camera-input network with frozen weights.
-6. In Camera placement and variation choose Fixed, Nearby, or Wider setups.
-   A setup stays fixed within an attempt and varies between attempts.
-7. STOP & save waits for the current bounded operation, writes the policy/optimizer/
-   counters/RNG, reload-verifies them, and then displays Saved and verified.
+Use the SAME START_SEIZO.bat. No new folder, app or API key.
+STOP & save, wait for verified saving and idle, close the terminal and reopen it.
 
-The two inputs are fake cameras rendered by the simulator. No real Pi feeds, device
-camera permissions, Hack Club calls, or hidden joint/object coordinates are needed.
-The human's third-person 3D viewer is NOT a policy input. The simulator may use
-internal state for reward and a fixed rejection guard, never as neural observation.
-Both actor and critic use current/previous RGB plus known task instructions and the
-policy's own prior command. Fixed image averaging yields a compact CPU network.
-The fake cameras show simplified physics geometry, not photorealistic room video.
+Leave Training views on Automatic and Task on Automatic lessons. Train / resume
+starts a random-initialized PPO network. It samples its own bounded actions,
+receives task rewards and a small early bonus for new actual movement. Repeated
+poses receive no repeated bonus within an attempt. The discovery bonus is capped
+at +0.5 per attempt and fades to zero by episode 500. The task reward remains.
 
-Your earlier state-based training is kept under the same protected data folder.
-New camera weights live in data/camera_pixels_v8. An old policy is NOT relabeled as
-camera-trained. Camera-policy progress is saved and resumed from that same path.
-Windows account-bound Hack Club key storage is unchanged. No credentials are in
-this release. No PEAC, Railway, Raspberry Pi or physical controller was modified.
+Initially the learner can see overhead, wrist, side and front RGB views. Some
+unassisted attempts are included early to avoid dependence on the extra views.
+Helper views become less frequent, then disappear, only after two successive
+held-out 20-trial checks with >=70% success and no invalid-physics trials. Time or
+update counters do not certify a skill. Failure leaves the phase unchanged.
 
-Default additional budget is 1,000 completed episodes, not a million tests. Nothing
-starts automatically. Practising Roll names a current lesson, not verified mastery.
-Only held-out evaluation results support improvement; an update count is not skill.
-Learning/testing can take longer than the old privileged-state simulator because
-images are rendered at every observation. No camera-policy mastery is claimed.
+Test all tasks ALWAYS masks side and front views. It scores using wrist and
+overhead only, without updating weights or adding the discovery bonus. Camera
+focus buttons only enlarge a picture for you; they do not secretly change inputs.
+Watch policy uses the selected practice-view condition and does not update weights.
 
-If RGB rendering fails, training reports the error and is blocked; it never silently
-falls back to reading hidden simulator state. Hardware dimensions, camera placement,
-gripper tabs, forces and table clearance remain uncalibrated estimates. This cannot
-control the real arm, and virtual test success does not grant hardware authority.
+The four views render the detailed arm meshes with shadows and procedural
+floor/mat materials. Camera positions are estimates informed by the existing
+setup, not measured intrinsics or real Pi frames. The wrist camera remains
+selectable before the roll joint or on the rolling hand. The main third-person
+viewer is not another neural input. The actor and critic receive RGB, task
+instructions, prior requested actions and camera validity, not exact body poses.
+Views are 384x288, pooled to 48x36 per camera for the CPU network.
+
+Earlier state and v8 camera checkpoints are not deleted or renamed as trained
+for this new input space. New progress is in data/camera_views_v9; STOP & save
+also preserves the view curriculum and verifies reloading. Saved Windows keys
+are unchanged. Training/testing make zero cloud API calls. Nothing auto-starts.
+
+Two tool servos only: full simulated shaft roll and coupled jaw opening. Main
+arm physics, jaw contacts and table/penetration rejection remain in place. The
+higher-detail visual meshes are not calibrated physical collision geometry.
+No Pi, GPIO, serial, robot control, PEAC or Railway changes are included. Real
+hardware testing requires measured limits, camera calibration and local safeguards.

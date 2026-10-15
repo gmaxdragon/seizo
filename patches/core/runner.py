@@ -71,6 +71,7 @@ def evaluate(agent,task,n=20,seed=810017,random_policy=False,stop=None,fault_pro
         'invalid_physics':sum(int(r.get('invalid_physics',False)) for r in records),
         'observation_mode':'two_rgb_cameras' if getattr(world_factory,'image_policy',False) else 'privileged_simulator_state',
         'input_source':'simulated_overhead_and_wrist_rgb' if getattr(world_factory,'image_policy',False) else 'simulator_state',
+        'sensor_condition':('two_mounted_cameras' if (world_options or {}).get('view_mode')=='two' else 'training_view_setting'),
         'weights_updated':False,'physical_motion':False}
 
 
@@ -218,6 +219,7 @@ class Runner:
             def stopped():return self.stop_event.is_set() or self.agent.episodes>=self.target
             while not stopped():
                 started=time.monotonic()
+                if hasattr(self,'prepare_training_world'):self.prepare_training_world(env)
                 batch,completed=rollout(self.agent,env,96,on_episode=complete,on_frame=frame,stop=stopped)
                 if batch is not None and len(batch[0])>1:
                     # Finish this bounded PPO update before checkpointing, unless user stopped.
@@ -227,7 +229,8 @@ class Runner:
                 if time.monotonic()-last_save>25:self.save();last_save=time.monotonic()
                 if self.agent.steps>=next_eval and not stopped():
                     clone=self.agent.clone();task=TASKS[self.stage] if self.config['task']=='curriculum' else (self.config['task'] if self.config['task'] in TASKS else 'reach')
-                    val=evaluate(clone,task,5 if self.is_camera else 24,seed=812321+int(self.agent.steps//16000)*91,stop=self.stop_event.is_set,world_factory=self.World,world_options=self.world_options())
+                    val=evaluate(clone,task,getattr(self,'validation_trials',5 if self.is_camera else 24),seed=812321+int(self.agent.steps//16000)*91,stop=self.stop_event.is_set,world_factory=self.World,world_options=self.evaluation_options())
+                    if hasattr(self,'after_validation'):self.after_validation(val,env)
                     with self.lock:
                         self.validation=val
                         self.history.append({'episodes':self.agent.episodes,'moves':self.agent.steps,**val});self.history=self.history[-200:]
@@ -361,12 +364,12 @@ class Runner:
                     for label in ('policy','random'):
                         with self.lock:self.evaluation_progress={'phase':name+' / '+label,'completed':index,'total':len(names)}
                         value=evaluate(current if label=='policy' else initial,name,trials,seed+index*1000,
-                                       random_policy=(label=='random'),stop=self.stop_event.is_set,world_factory=self.World,world_options=self.world_options(),on_trial=self._eval_trial)
+                                       random_policy=(label=='random'),stop=self.stop_event.is_set,world_factory=self.World,world_options=self.evaluation_options(),on_trial=self._eval_trial)
                         if label=='policy':now=value
                         else:baseline=value
                     rows.append({'current':now,'random_actions':baseline})
                 # Fault exercise stays separate from clean task scores.
-                faults=evaluate(current,'reach',max(5,trials//2),seed+9000,stop=self.stop_event.is_set,fault_probability=1.,world_factory=self.World,world_options=self.world_options())
+                faults=evaluate(current,'reach',max(5,trials//2),seed+9000,stop=self.stop_event.is_set,fault_probability=1.,world_factory=self.World,world_options=self.evaluation_options())
                 def combine(key):
                     vals=[r[key] for r in rows];n=sum(v['trials'] for v in vals);passed=sum(v['successes'] for v in vals)
                     return {'task':task,'trials':n,'successes':passed,'success_rate':passed/n,
@@ -400,6 +403,9 @@ class Runner:
                 with self.lock:self.status='error';self.error=str(e)
                 (self.folder/'last_error.txt').write_text(traceback.format_exc())
         self.thread=threading.Thread(target=run,daemon=True);self.thread.start();return {'ok':True,'cloud_requests':0}
+
+    def evaluation_options(self):
+        return self.world_options()
 
     def world_options(self):
         return {'camera_config':self.camera_config} if self.is_camera else {}

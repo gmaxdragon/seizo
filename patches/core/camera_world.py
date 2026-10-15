@@ -65,6 +65,7 @@ def camera_xml(config):
     return ET.tostring(root,encoding='unicode')
 
 class CameraWorld(MuJoCoWorld):
+    xml_factory=staticmethod(camera_xml)
     MODEL_ID=POLICY_ID
     image_policy=True
     training_envs=1
@@ -82,7 +83,7 @@ class CameraWorld(MuJoCoWorld):
         self._ages=np.zeros((int(n),2),int);self._available=np.ones((int(n),2),bool)
         self._packet_serial=np.zeros(int(n),int);self._previous_action=np.zeros((int(n),5))
         super().__init__(n=n,seed=seed,task=task,fault_probability=fault_probability,
-                         xml_text=camera_xml(self.camera_config))
+                         xml_text=self.xml_factory(self.camera_config))
         self._camera_ready=True
         self._camids=[self.model.camera(name).id for name in ('overhead','wrist')]
         self._goal_mocap=int(self.model.body_mocapid[self.model.body('requested_goal_marker').id])

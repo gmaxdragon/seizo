@@ -1,0 +1,31 @@
+name: Views v9 source workbench
+on:
+  push:
+    branches: [seizo-view-exploration-v9]
+    paths: [.github/workflows/views-v9-workbench.yml]
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify published simulator source
+        run: |
+          mkdir -p workbench
+          tar -xJf Seizo_Learn_Web.tar.xz -C workbench
+          cp -r patches/. workbench/Seizo_Learn/
+          cp desktop_manifest.json workbench/previous_manifest.json
+          cp seizo_updater.py workbench/seizo_updater.py
+          python - <<'PY'
+          import json,hashlib
+          from pathlib import Path
+          for name,entry in json.loads(Path('desktop_manifest.json').read_text())['patches'].items():
+              assert hashlib.sha256((Path('workbench/Seizo_Learn')/name).read_bytes()).hexdigest()==entry['sha256'],name
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: seizo-views-v9-workbench
+          path: workbench/
+          retention-days: 2

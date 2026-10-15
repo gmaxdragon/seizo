@@ -1,0 +1,91 @@
+name: Seizo simulated camera updater validation
+on:
+  push:
+    branches: [seizo-camera-updater-v8]
+    paths: [.github/workflows/validate-camera-v8.yml]
+permissions:
+  contents: read
+jobs:
+  validate:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 18
+    defaults:
+      run:
+        shell: bash
+    env:
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '1'
+      SEIZO_PHYSICS_ENGINE: mujoco
+    steps:
+      - name: Preserve exact source bytes on Windows
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install CPU learning and simulated camera dependencies
+        run: python -m pip install --disable-pip-version-check 'numpy<3' 'mujoco==3.3.7'
+      - name: Configure headless Linux RGB renderer
+        if: runner.os == 'Linux'
+        run: |
+          echo 'MUJOCO_GL=egl' >> "$GITHUB_ENV"
+          echo 'PYOPENGL_PLATFORM=egl' >> "$GITHUB_ENV"
+      - name: Assemble exact camera learner from reviewed delta
+        run: python scripts/assemble_camera_v8.py
+      - name: Camera, physics, learning, saving and key-security tests
+        working-directory: Seizo_Learn
+        run: |
+          python -m compileall -q core app.py bootstrap.py
+          set -o pipefail
+          python -m unittest discover -s tests -p 'test_*.py' -v 2>&1 | tee evidence/camera-production-tests.txt
+          python tests/camera_http_smoke.py | tee evidence/camera-http-result.json
+          node tests/gripper_model.mjs | tee evidence/geometry-check.json
+      - name: Install actual browser dependencies
+        if: runner.os == 'Linux'
+        run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+      - name: Actual two-camera WebGL workflow and seven-task frozen evaluation
+        if: runner.os == 'Linux'
+        working-directory: Seizo_Learn
+        run: python tests/browser_camera_v8.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: seizo-camera-v8-${{ runner.os }}-evidence
+          path: Seizo_Learn/evidence/
+          retention-days: 7
+  stage-verified-source:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: seizo-camera-updater-v8
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Materialize tested source on isolated branch only
+        run: |
+          python scripts/assemble_camera_v8.py
+          python - <<'PY'
+          import json,shutil
+          from pathlib import Path
+          for name in json.loads(Path('camera-v8-paths.json').read_text()):
+              target=Path('patches')/name
+              target.parent.mkdir(parents=True,exist_ok=True)
+              shutil.copyfile(Path('Seizo_Learn')/name,target)
+          PY
+          git config user.name 'Seizo validation'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add patches
+          git commit -m 'Validated simulated-camera training/test integration; stable release remains manual'
+          git push origin HEAD:seizo-camera-updater-v8
+          git rev-parse HEAD

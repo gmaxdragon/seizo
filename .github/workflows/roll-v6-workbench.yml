@@ -1,0 +1,28 @@
+name: Roll v6 isolated workbench
+on:
+  push:
+    branches: [seizo-roll-v6]
+    paths: [.github/workflows/roll-v6-workbench.yml]
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Assemble current app and exact sources
+        run: |
+          mkdir -p workbench
+          tar -xJf Seizo_Learn_Web.tar.xz -C workbench
+          cp -r patches/. workbench/Seizo_Learn/
+          cp desktop_manifest.json workbench/previous_manifest.json
+          python -m pip download --only-binary=:all: --dest workbench/wheels 'mujoco==3.3.7' 'numpy<3'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: seizo-roll-v6-workbench
+          path: workbench/
+          retention-days: 1

@@ -1,0 +1,32 @@
+name: Contact v7 isolated source
+on:
+  push:
+    branches: [seizo-contact-guard-v7]
+    paths: [.github/workflows/contact-v7-workbench.yml]
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble current simulator without hardware programs
+        run: |
+          mkdir -p workbench
+          tar -xJf Seizo_Learn_Web.tar.xz -C workbench
+          cp -r patches/. workbench/Seizo_Learn/
+          cp desktop_manifest.json workbench/previous_manifest.json
+          python - <<'PY'
+          import json,hashlib
+          from pathlib import Path
+          m=json.loads(Path('desktop_manifest.json').read_text())
+          for name,entry in m['patches'].items():
+              assert hashlib.sha256((Path('workbench/Seizo_Learn')/name).read_bytes()).hexdigest()==entry['sha256'],name
+          print('Every assembled patch matches published source checksum.')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: seizo-contact-v7-workbench
+          path: workbench/
+          retention-days: 2

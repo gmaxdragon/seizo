@@ -7,7 +7,7 @@ const TASKS=['reach','orient','push','lift','place'];
 async function api(path,body){
  if(body!==undefined&&['/api/start','/api/stop'].includes(path))body={...body,control_seq:++controlSeq};
  const abort=new AbortController();
- const limit=path.includes('/hackclub/test')?40000:path==='/api/trial'?90000:15000;
+ const limit=path.includes('/hackclub/test')?40000:['/api/trial','/api/gripper-check'].includes(path)?90000:15000;
  const timer=setTimeout(()=>abort.abort(),limit);
  try{
   const r=await fetch(path,{method:body===undefined?'GET':'POST',headers:{'X-Lab-Token':token,...(body===undefined?{}:{'Content-Type':'application/json'})},body:body===undefined?undefined:JSON.stringify(body),cache:'no-store',signal:abort.signal});
@@ -23,15 +23,9 @@ async function api(path,body){
 function say(s,error=false){$('status').textContent=s;$('status').className=error?'error':'';}
 function fail(e){say(e.message||String(e),true);}
 function task(){const s=$('task').value;return TASKS.includes(s)?s:s==='all'?TASKS[Math.floor(Math.random()*5)]:TASKS[status?.stage||0];}
-function controls(){const unavailable=!connected;const active=['training','stopping','evaluating'].includes(status?.status);$('train').disabled=unavailable||active||busy;$('watch').disabled=unavailable||!graphicsReady||active||busy;$('evaluate').disabled=unavailable||active||busy;$('task').disabled=unavailable||active||busy;}
-function show(f){latestFrame=f;if(!view||!graphicsReady)return;view.show(f);const selected=f.objects[f.selected_object];let extra=f.task==='orient'?` · targets: wrist ${f.wrist_goal.toFixed(0)}°, opening ${(f.gap_goal*100).toFixed(0)}%`:['lift','place'].includes(f.task)?` · lift ${f.lift_mm.toFixed(0)} mm · ${selected.pinched?'grasped':'not grasped'}`:'';$('taskInfo').textContent=`${f.task_label} · ${selected.name} · wrist ${f.pose.wrist.toFixed(0)}° · gripper ${(f.pose.gripper*100).toFixed(0)}%${extra}${f.arm_object_contact?' · solid collision':''}`}
+function controls(){const unavailable=!connected;const active=['training','stopping','evaluating'].includes(status?.status);$('train').disabled=unavailable||active||busy;$('watch').disabled=unavailable||!graphicsReady||active||busy;$('evaluate').disabled=unavailable||active||busy;$('task').disabled=unavailable||active||busy;$('gripperCheck').disabled=unavailable||!graphicsReady||active||busy;}
+function show(f){latestFrame=f;if(!view||!graphicsReady)return;view.show(f);const selected=f.objects[f.selected_object];let extra=f.task==='orient'?` · targets: wrist ${f.wrist_goal.toFixed(0)}°, opening ${(f.gap_goal*100).toFixed(0)}%`:['lift','place'].includes(f.task)?` · lift ${f.lift_mm.toFixed(0)} mm · ${selected.pinched?'grasped':'not grasped'}`:'';$('taskInfo').textContent=`${f.task_label} · ${selected.name} · wrist ${f.pose.wrist.toFixed(0)}° · gripper ${(f.pose.gripper*100).toFixed(0)}%${extra}${f.arm_object_contact?' · contact resists closure':''}${f.diagnostic?' · '+f.diagnostic_phase+' · NOT AI training':''}`}
 function begin(trace,label){play={trace,index:0,at:0,label,generation:epoch};show(trace.frames[0]);$('overlay').textContent=label;}
-function interpolate(a,b,t){
- const f={...a,pose:{...a.pose},objects:a.objects.map(o=>({...o,position:[...o.position]}))};
- for(const k of Object.keys(f.pose))f.pose[k]=a.pose[k]+(b.pose[k]-a.pose[k])*t;
- for(let i=0;i<3;i++)for(let j=0;j<3;j++)f.objects[i].position[j]=a.objects[i].position[j]+(b.objects[i].position[j]-a.objects[i].position[j])*t;
- return f;
-}
 function frame(t){
  try {
  if(graphicsFailed)return;
@@ -39,10 +33,10 @@ function frame(t){
  if(play&&play.generation===epoch){
   play.at+=dt;const ms=+$('speed').value;
   const fs=play.trace.frames;
-  if(play.index<fs.length-1)show(interpolate(fs[play.index],fs[play.index+1],Math.min(1,play.at/ms)));
+  if(play.index<fs.length-1)show(fs[play.index]);
   if(play.at>=ms){play.at=0;play.index++;
    if(play.index<fs.length){show(fs[play.index]);$('overlay').textContent=`${play.label} · move ${play.index}/${fs.length-1}`;}
-   else{const p=play;play=null;$('outcome').textContent=p.trace.fault?'Trial stopped on an injected fault. This is a supervisor test, not learned safety.':p.trace.success?'This virtual trial reached its success criteria. Check progress tests more fresh scenes.':'This trial did not succeed. No scripted rescue or replacement was used.';}
+   else{const p=play;play=null;$('outcome').textContent=p.trace.diagnostic?p.trace.diagnostic_message:p.trace.fault?'Trial stopped on an injected fault. This is a supervisor test, not learned safety.':p.trace.success?'This virtual trial reached its success criteria. Check progress tests more fresh scenes.':'This trial did not succeed. No scripted rescue or replacement was used.';}
   }
  }
  view?.renderer.render();
@@ -62,6 +56,19 @@ async function poll(){if(polling||closed)return;polling=true;try{status=await ap
  else if(!play&&!busy)say(s.updates?`Saved. ${nf(s.updates)} neural updates completed. Choose Watch policy or Check progress.`:'Ready. The policy starts untrained. Watch it first, then Train / resume.');
  if(s.evaluation&&JSON.stringify(s.evaluation)!==evalSeen){evalSeen=JSON.stringify(s.evaluation);let a=s.evaluation.current,b=s.evaluation.random_actions;$('evaluation').textContent=s.evaluation.by_task?s.evaluation.by_task.map(r=>`${r.current.task}: policy ${r.current.successes}/${r.current.trials}, random ${r.random_actions.successes}/${r.random_actions.trials}`).join(' · '):`Fresh ${a.task} test: learned policy ${a.successes}/${a.trials}; random actions ${b.successes}/${b.trials}. Mean error ${a.mean_error_mm.toFixed(1)} mm versus ${b.mean_error_mm.toFixed(1)} mm (estimated simulation units).`;}
  controls();}catch(e){connected=false;$('connection').textContent=e.message;$('connection').className='error';controls();}finally{polling=false}}
+
+$('gripperCheck').onclick=async()=>{
+ busy=true;controls();const id=++epoch;play=null;
+ try{
+  say('Computing a local two-servo physics check. No API key or physical arm is used.');
+  const tr=await api('/api/gripper-check',{mode:$('gripperMode').value});
+  if(id!==epoch)return;
+  begin(tr,'Gripper check, not AI learning');
+  if(tr.frames?.length){view.renderer.target=tr.frames[0].tool;view.renderer.radius=430;view.renderer.polar=.65;view.renderer.az=1.15;}
+  say('Arm axes fixed for this diagnostic. STOP cancels playback.');
+ }catch(e){fail(e)}finally{busy=false;controls()}
+};
+
 $('task').onchange=()=>{epoch++;play=null;$('outcome').textContent='Choose Watch policy to test this task.'};
 $('settingsOpen').onclick=()=>$('settings').showModal();$('settingsClose').onclick=()=>$('settings').close();$('fit').onclick=()=>view?.fit();
 $('reset').onclick=async()=>{if(!confirm('Back up this policy and start a completely untrained one? Stop training first.'))return;try{epoch++;play=null;await api('/api/reset',{confirmed:true});evalSeen='';$('evaluation').textContent='';await poll();$('settings').close()}catch(e){fail(e)}};
@@ -87,8 +94,8 @@ async function init(){
  if(status?.config){$('episodes').value=status.config.episodes;$('task').value=status.config.task;$('compute').value=status.config.compute;}
  try{
   const fetchJSON=async path=>{const r=await fetch(path,{cache:'no-store'});if(!r.ok)throw Error('Missing '+path+'; extract the whole download folder.');return r.json();};
-  const [module,meshes,spec]=await Promise.all([import('./learning_view.js'),fetchJSON('/assets/meshes.json'),fetchJSON('/assets/kinematics.json')]);
-  view=module.createView($('viewport'),meshes,spec);graphicsReady=true;graphicsFailed=false;
+  const [module,meshes,spec,gripperSpec]=await Promise.all([import('./learning_view.js'),fetchJSON('/assets/meshes.json'),fetchJSON('/assets/kinematics.json'),fetchJSON('/assets/gripper.json')]);
+  view=module.createView($('viewport'),meshes,spec,gripperSpec);graphicsReady=true;graphicsFailed=false;
   show(await api('/api/initial'));if(!animationStarted){animationStarted=true;requestAnimationFrame(frame);}
   controls();
  }catch(e){graphicsError(e.message||String(e));}

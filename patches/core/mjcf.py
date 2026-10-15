@@ -10,10 +10,10 @@ Keep SEIZO_PHYSICAL_MOTION disabled: no Pi, serial, GPIO, or motor imports.
 from __future__ import annotations
 from xml.etree import ElementTree as ET
 
-MODEL_VERSION='seizo-five-control-mujoco-rigid-v4'
-DT=0.002
-SUBSTEPS=30
-JOINT_NAMES=('base_yaw','shoulder_pitch','elbow_relative','wrist_yaw','left_finger','right_finger')
+MODEL_VERSION='seizo-two-servo-parallel-contact-v5'
+DT=0.001
+SUBSTEPS=60
+JOINT_NAMES=('base_yaw','shoulder_pitch','elbow_relative','wrist_yaw','left_finger','right_finger','left_parallel','right_parallel','wrist_level')
 ACTUATOR_NAMES=('motor_base','motor_shoulder','motor_elbow','motor_wrist','motor_gripper')
 OBJECT_NAMES=('red_cube','green_cylinder','blue_ball')
 OBJECT_GEOMS=('object_red','object_green','object_blue')
@@ -21,103 +21,76 @@ FINGER_GEOMS=('left_jaw_contact','right_jaw_contact')
 FLOOR_M=.065
 
 
+# Preserve the unchanged v4 arm-body template; replace its tool mechanism below.
+from ._arm_template import xml_model as _legacy_xml
+
+
 def xml_model():
-    """Build MuJoCo XML. Primarily convex geometric approximations, never STL hulls."""
-    return '''<mujoco model="Seizo MK2 Plus provisional dynamics">
-  <compiler angle="radian" autolimits="true"/>
-  <option timestep="0.002" gravity="0 0 -9.81" integrator="implicitfast" solver="Newton" iterations="90" cone="elliptic">
-    <flag nativeccd="enable"/>
-  </option>
-  <default>
-    <joint damping="0.10" armature="0.0002" frictionloss="0.012"/>
-    <geom solref="0.008 1" solimp="0.93 0.97 0.001" friction="0.95 0.006 0.0005" condim="4"/>
-  </default>
-  <worldbody>
-    <geom name="desk" type="plane" pos="0 0 0.065" size="2 2 0.01" rgba="0.69 0.75 0.79 1" friction="0.9 0.02 0.001"/>
-    <body name="base_foot" pos="0 0 0">
-      <geom type="cylinder" name="stationary_base" pos="0 0 0.028" size="0.074 0.025" rgba="0.5 0.3 0.8 1"/>
-      <body name="turntable" pos="0 0 0.065">
-        <joint name="base_yaw" axis="0 0 1" type="hinge" range="-1.0472 1.0472" damping="0.16" armature="0.001"/>
-        <geom name="yaw_deck" type="cylinder" pos="0 0 0.008" size="0.058 0.008" density="1100"/>
-        <geom name="fixed_rear_support" type="box" pos="-0.028 0 0.030" size="0.020 0.033 0.035" density="900"/>
-        <body name="upper_arm" pos="0 0 0.070">
-          <joint name="shoulder_pitch" type="hinge" axis="0 -1 0" range="0.436332 1.658063" damping="0.32" armature="0.004"/>
-          <geom name="upper_left_rail" type="capsule" fromto="0 -0.026 0 0.145 -0.026 0" size="0.009" density="950"/>
-          <geom name="upper_right_rail" type="capsule" fromto="0 0.026 0 0.145 0.026 0" size="0.009" density="950"/>
-          <geom name="upper_crossbar" type="capsule" fromto="0.142 -0.027 0 0.142 0.027 0" size="0.009" density="950"/>
-          <body name="forearm" pos="0.145 0 0">
-            <joint name="elbow_relative" type="hinge" axis="0 -1 0" range="-2.792527 -0.174533" damping="0.25" armature="0.002"/>
-            <geom name="forearm_left_rail" type="capsule" fromto="0 -0.027 0 0.220 -0.027 0" size="0.008" density="950"/>
-            <geom name="forearm_right_rail" type="capsule" fromto="0 0.027 0 0.220 0.027 0" size="0.008" density="950"/>
-            <geom name="forearm_crossbar_start" type="capsule" fromto="0 -0.03 0 0 0.03 0" size="0.009" density="950"/>
-            <geom name="forearm_crossbar_mid" type="capsule" fromto="0.108 -0.03 0 0.108 0.03 0" size="0.009" density="950"/>
-            <geom name="forearm_crossbar_end" type="capsule" fromto="0.218 -0.03 0 0.218 0.03 0" size="0.008" density="950"/>
-            <body name="wrist_and_palm" pos="0.220 0 0">
-              <joint name="wrist_yaw" type="hinge" axis="0 0 1" range="-1.308997 1.308997" damping="0.04" armature="0.00015"/>
-              <geom name="wrist_housing" type="box" pos="0.020 0 0.012" size="0.023 0.026 0.018" density="950"/>
-              <geom name="palm" type="box" pos="0.063 0 0" size="0.024 0.021 0.010" density="950"/>
-              <site name="tool_tip" pos="0.173 0 0" size="0.004" rgba="1 0 0 1"/>
-              <body name="left_jaw" pos="0.103 0.003 0">
-                <joint name="left_finger" type="slide" axis="0 1 0" range="0 0.025" damping="0.15" frictionloss="0.05"/>
-                <geom name="left_jaw_contact" type="capsule" fromto="0 0 0 0.070 0 0" size="0.0045" density="950" friction="1.3 0.02 0.003"/>
-              </body>
-              <body name="right_jaw" pos="0.103 -0.003 0">
-                <joint name="right_finger" type="slide" axis="0 -1 0" range="0 0.025" damping="0.15" frictionloss="0.05"/>
-                <geom name="right_jaw_contact" type="capsule" fromto="0 0 0 0.070 0 0" size="0.0045" density="950" friction="1.3 0.02 0.003"/>
-              </body>
-            </body>
-          </body>
-        </body>
-      </body>
-    </body>
-    <body name="red_cube" pos="0.38 -0.10 0.077">
-      <freejoint name="free_red"/>
-      <geom name="object_red" type="box" size="0.012 0.012 0.012" density="4000" rgba="0.9 0.2 0.2 1"/>
-    </body>
-    <body name="green_cylinder" pos="0.38 0 0.078">
-      <freejoint name="free_green"/>
-      <geom name="object_green" type="cylinder" size="0.012 0.013" density="2500" rgba="0.2 0.85 0.4 1"/>
-    </body>
-    <body name="blue_ball" pos="0.38 0.10 0.078">
-      <freejoint name="free_blue"/>
-      <geom name="object_blue" type="sphere" size="0.013" density="3000" rgba="0.2 0.35 0.9 1"/>
-    </body>
-  </worldbody>
-  <contact>
-    <exclude body1="left_jaw" body2="right_jaw"/>
-  </contact>
-  <equality>
-    <!-- The real modified gripper has one servo that moves both jaws. -->
-    <joint name="mirrored_gripper_jaws" joint1="left_finger" joint2="right_finger" polycoef="0 1 0 0 0"/>
-  </equality>
-  <tendon>
-    <fixed name="single_gripper_servo_tendon">
-      <joint joint="left_finger" coef="1"/>
-      <joint joint="right_finger" coef="1"/>
-    </fixed>
-  </tendon>
-  <actuator>
-    <position name="motor_base" joint="base_yaw" kp="12" ctrllimited="true" ctrlrange="-1.0472 1.0472" forcelimited="true" forcerange="-1.6 1.6"/>
-    <position name="motor_shoulder" joint="shoulder_pitch" kp="14" ctrllimited="true" ctrlrange="0.436332 1.658063" forcelimited="true" forcerange="-2.4 2.4"/>
-    <position name="motor_elbow" joint="elbow_relative" kp="10" ctrllimited="true" ctrlrange="-2.792527 -0.174533" forcelimited="true" forcerange="-1.8 1.8"/>
-    <position name="motor_wrist" joint="wrist_yaw" kp="3.5" ctrllimited="true" ctrlrange="-1.308997 1.308997" forcelimited="true" forcerange="-0.28 0.28"/>
-    <position name="motor_gripper" tendon="single_gripper_servo_tendon" kp="260" ctrllimited="true" ctrlrange="0 0.05" forcelimited="true" forcerange="-8 8"/>
-  </actuator>
-</mujoco>'''
+    """Make linked jaws from the actual displayed mesh; keep only FIVE actuators.
+
+    Internal follower joints are constrained mechanical links, not extra servos.
+    The shaft axis is retained from the existing model and remains uncalibrated.
+    """
+    from .gripper_geometry import SPEC, MAX_ANGLE
+    root=ET.fromstring(_legacy_xml())
+    root.find('option').set('timestep', str(DT))
+    root.find('option').set('iterations','120')
+    forearm=root.find(".//body[@name='forearm']")
+    wrist=forearm.find("body[@name='wrist_and_palm']")
+    forearm.remove(wrist)
+    level=ET.SubElement(forearm,'body',name='wrist_mount',pos='0.220 0 0')
+    ET.SubElement(level,'joint',name='wrist_level',type='hinge',axis='0 -1 0',range='-2.9 2.9',damping='0.03',armature='0.00005')
+    ET.SubElement(level,'inertial',pos='0 0 0',mass='0.025',diaginertia='0.000006 0.000006 0.000006')
+    wrist.set('pos','0 0 0');level.append(wrist)
+    joint=wrist.find("joint[@name='wrist_yaw']")
+    joint.set('axis',' '.join(str(v) for v in SPEC['wrist_axis']))
+    joint.set('pos',' '.join(str(v*.001) for v in SPEC['wrist_pivot']))
+    wrist.find("site[@name='tool_tip']").set('pos','0.173 0 0.001')
+    # The hand is hollow. Convex pieces partition its contour, not its whole hull.
+    asset=ET.SubElement(root,'asset')
+    contact=root.find('contact');contact.clear()
+    # Intended shared-joint intersection only. Never exclude the opposing jaws.
+    ET.SubElement(contact,'exclude',body1='forearm',body2='wrist_and_palm')
+    root.find(".//geom[@name='fixed_rear_support']").set('pos','-.028 0 .040')
+    eq=root.find('equality');eq.clear()
+    tendon=root.find('tendon');tendon.clear()
+    fixed=ET.SubElement(tendon,'fixed',name='passive_wrist_level')
+    for name in ('shoulder_pitch','elbow_relative','wrist_level'):
+        ET.SubElement(fixed,'joint',joint=name,coef='1')
+    ET.SubElement(eq,'tendon',name='parallel_wrist_support',tendon1='passive_wrist_level',polycoef='0 0 0 0 0',solref='0.003 1',solimp='0.995 0.999 0.0001')
+    gripper_tendon=ET.SubElement(tendon,'fixed',name='single_gripper_servo_tendon')
+    for label,side in (('left',1),('right',-1)):
+        old=wrist.find("body[@name='%s_jaw']"%label);wrist.remove(old)
+        a,b,_=SPEC['root'];x,y,_=SPEC['link']
+        driver=ET.SubElement(wrist,'body',name=label+'_drive',pos=f'{a*.001} {side*b*.001} 0')
+        ET.SubElement(driver,'joint',name=label+'_finger',type='hinge',axis=f'0 0 {side}',range=f'0 {MAX_ANGLE}',damping='0.008',armature='0.000015',frictionloss='0.001',solreflimit='0.003 1',solimplimit='0.995 0.999 0.0001')
+        ET.SubElement(driver,'geom',name=label+'_drive_link',type='capsule',fromto=f'0 0 0 {x*.001} {side*y*.001} 0',size='.0024',mass='.006',contype='0',conaffinity='0')
+        jaw=ET.SubElement(driver,'body',name=label+'_jaw',pos=f'{x*.001} {side*y*.001} {SPEC["jaw_z"]*.001}')
+        ET.SubElement(jaw,'joint',name=label+'_parallel',type='hinge',axis=f'0 0 {side}',range=f'{-MAX_ANGLE} 0',damping='0.004',armature='0.00001',frictionloss='0.001')
+        ET.SubElement(jaw,'inertial',pos=f'.035 {-side*.016} .003',mass='.018',diaginertia='.000004 .000011 .000014')
+        for k,poly in enumerate(SPEC['convex_pieces']):
+            verts=[(px*.001,side*py*.001,z) for z in (0.,SPEC['jaw_thickness']*.001) for px,py in poly]
+            name=f'{label}_jaw_piece_{k}'
+            ET.SubElement(asset,'mesh',name=name,vertex=' '.join(f'{v:.8g}' for p in verts for v in p))
+            ET.SubElement(jaw,'geom',name=name,type='mesh',mesh=name,mass='0',friction='1.0 .008 .001',solref='.004 1',solimp='.98 .995 .0002')
+        px,py,pz=SPEC['pad_center'];size=SPEC['pad_halfsize']
+        ET.SubElement(jaw,'geom',name=label+'_jaw_contact',type='box',pos=f'{px*.001} {side*py*.001} {pz*.001}',size=' '.join(str(v*.001) for v in size),mass='.001',friction='1.25 .01 .001',solref='.009 1',solimp='.92 .98 .00035',rgba='.98 .37 .085 1')
+        ET.SubElement(eq,'joint',name=label+'_parallel_constraint',joint1=label+'_parallel',joint2=label+'_finger',polycoef='0 -1 0 0 0',solref='.003 1',solimp='.995 .999 .0001')
+        ET.SubElement(gripper_tendon,'joint',joint=label+'_finger',coef='.5')
+    ET.SubElement(eq,'joint',name='mirrored_gripper_jaws',joint1='left_finger',joint2='right_finger',polycoef='0 1 0 0 0',solref='.003 1',solimp='.995 .999 .0001')
+    actuator=root.find("actuator/position[@name='motor_gripper']")
+    actuator.set('ctrlrange',f'0 {MAX_ANGLE}');actuator.set('kp','0.8');actuator.set('kv','.014');actuator.set('forcerange','-.06 .06')
+    # No exclusion between the two opposing jaws. The solver must resist contact.
+    return ET.tostring(root,encoding='unicode')
 
 
 def validate_structure():
-    """Structure check works even where MuJoCo wheels cannot be downloaded."""
     root=ET.fromstring(xml_model())
     names=[x.get('name') for x in root.findall('.//worldbody//joint') if x.get('name')]
-    actuators=[x.get('name') for x in root.findall('.//actuator/position')]
-    free=[x.get('name') for x in root.findall('.//freejoint')]
-    geom={x.get('name') for x in root.findall('.//geom')}
-    assert set(JOINT_NAMES)==set(names), (JOINT_NAMES,names)
-    assert set(ACTUATOR_NAMES)==set(actuators)
-    assert len(root.findall('.//equality/joint'))==1
-    assert len(root.findall('.//tendon/fixed'))==1
-    assert free==['free_red','free_green','free_blue']
-    assert set(FINGER_GEOMS+OBJECT_GEOMS).issubset(geom)
-    assert all(x.get('forcelimited')=='true' for x in root.findall('.//actuator/position'))
-    return dict(joints=len(names),actuators=len(actuators),free_objects=len(free),geometries=len(root.findall('.//geom')))
+    acts=[x.get('name') for x in root.findall('.//actuator/position')]
+    assert set(JOINT_NAMES)==set(names)
+    assert tuple(acts)==ACTUATOR_NAMES
+    assert len(root.findall('.//equality/joint'))==3
+    assert not any({x.get('body1'),x.get('body2')}=={'left_jaw','right_jaw'} for x in root.findall('.//contact/exclude'))
+    assert len(root.findall('.//freejoint'))==3
+    return dict(joints=len(names),actuators=len(acts),free_objects=3,geometries=len(root.findall('.//geom')))

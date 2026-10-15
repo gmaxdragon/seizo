@@ -13,7 +13,7 @@ from core.runner import Runner,World
 from core.cloud import HackClubPlanner
 
 ROOT=Path(__file__).resolve().parent
-BUILD='seizo-mujoco-rigidbody-v4-20261014';PORT=8772
+BUILD='seizo-gripper-v5';PORT=8772
 
 class DataLock:
     def __init__(self,path):
@@ -90,6 +90,8 @@ def make_handler(runner,token,quit_event,cloud,instance_id='test-instance'):
                 data=strict_json(self.rfile.read(n))
                 if not isinstance(data,dict):raise ValueError('Expected a JSON object.')
                 path=urllib.parse.urlsplit(self.path).path
+                if path in ('/api/start','/api/trial','/api/evaluate','/api/gripper-check') and World.__module__!='core.mujoco_world':
+                    raise ValueError('MuJoCo is unavailable. Close Seizo and reopen START_SEIZO.bat to repair dependencies. Training is blocked instead of using the old contact model.')
                 def keys(allowed):
                     if set(data)-set(allowed):raise ValueError('Unknown setting.')
                 if path in ('/api/start','/api/stop'):
@@ -105,6 +107,13 @@ def make_handler(runner,token,quit_event,cloud,instance_id='test-instance'):
                     keys(('task','source','fault','seed'))
                     if type(data.get('fault',False))is not bool:raise ValueError('Invalid fault setting.')
                     result=runner.trial(**data)
+                elif path=='/api/gripper-check':
+                    keys(('mode',))
+                    with runner.lock:
+                        if runner.status in ('training','stopping','evaluating'):
+                            raise ValueError('Stop and save before checking the gripper.')
+                    from core.gripper_check import run_check
+                    result=run_check(data.get('mode','open_close'))
                 elif path=='/api/evaluate':
                     keys(('task',));result=runner.begin_evaluation(data.get('task','reach'))
                 elif path=='/api/reset':

@@ -1,0 +1,21 @@
+name: Views v9 mesh build tools
+on:
+  push:
+    branches: [seizo-view-exploration-v9]
+    paths: [.github/workflows/views-v9-build-tools.yml]
+permissions:
+  contents: read
+jobs:
+  tools:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip download --only-binary=:all: --no-deps --dest wheels fast-simplification
+      - uses: actions/upload-artifact@v4
+        with:
+          name: seizo-views-v9-mesh-tools
+          path: wheels/
+          retention-days: 1

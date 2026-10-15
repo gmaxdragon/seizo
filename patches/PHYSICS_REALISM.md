@@ -7,7 +7,7 @@ Seizo is local-only: no Railway compute, Raspberry Pi, GPIO, serial, or robot mo
 
 1. **MuJoCo** (preferred when installed): physically integrated *rigid bodies*,
    gravity, joint inertia, motor force limits, joint damping, friction, sliding
-   gripper fingers, force-based solid contact; the red cube, green cylinder and
+   gripper fingers driven by one coupled gripper servo, force-based contact; the red cube, green cylinder and
    blue ball have their correct primitive collision shapes. Physics advances
    at 2 ms internal substeps. An RL movement command spans 30 substeps.
 2. **Approximate** (if MuJoCo installation fails or user chooses fast mode):

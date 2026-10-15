@@ -14,7 +14,7 @@ MODEL_VERSION='seizo-five-control-mujoco-rigid-v4'
 DT=0.002
 SUBSTEPS=30
 JOINT_NAMES=('base_yaw','shoulder_pitch','elbow_relative','wrist_yaw','left_finger','right_finger')
-ACTUATOR_NAMES=('motor_base','motor_shoulder','motor_elbow','motor_wrist','motor_left_jaw','motor_right_jaw')
+ACTUATOR_NAMES=('motor_base','motor_shoulder','motor_elbow','motor_wrist','motor_gripper')
 OBJECT_NAMES=('red_cube','green_cylinder','blue_ball')
 OBJECT_GEOMS=('object_red','object_green','object_blue')
 FINGER_GEOMS=('left_jaw_contact','right_jaw_contact')
@@ -86,13 +86,22 @@ def xml_model():
   <contact>
     <exclude body1="left_jaw" body2="right_jaw"/>
   </contact>
+  <equality>
+    <!-- The real modified gripper has one servo that moves both jaws. -->
+    <joint name="mirrored_gripper_jaws" joint1="left_finger" joint2="right_finger" polycoef="0 1 0 0 0"/>
+  </equality>
+  <tendon>
+    <fixed name="single_gripper_servo_tendon">
+      <joint joint="left_finger" coef="1"/>
+      <joint joint="right_finger" coef="1"/>
+    </fixed>
+  </tendon>
   <actuator>
     <position name="motor_base" joint="base_yaw" kp="12" ctrllimited="true" ctrlrange="-1.0472 1.0472" forcelimited="true" forcerange="-1.6 1.6"/>
     <position name="motor_shoulder" joint="shoulder_pitch" kp="14" ctrllimited="true" ctrlrange="0.436332 1.658063" forcelimited="true" forcerange="-2.4 2.4"/>
     <position name="motor_elbow" joint="elbow_relative" kp="10" ctrllimited="true" ctrlrange="-2.792527 -0.174533" forcelimited="true" forcerange="-1.8 1.8"/>
     <position name="motor_wrist" joint="wrist_yaw" kp="3.5" ctrllimited="true" ctrlrange="-1.308997 1.308997" forcelimited="true" forcerange="-0.28 0.28"/>
-    <position name="motor_left_jaw" joint="left_finger" kp="260" ctrllimited="true" ctrlrange="0 0.025" forcelimited="true" forcerange="-8 8"/>
-    <position name="motor_right_jaw" joint="right_finger" kp="260" ctrllimited="true" ctrlrange="0 0.025" forcelimited="true" forcerange="-8 8"/>
+    <position name="motor_gripper" tendon="single_gripper_servo_tendon" kp="260" ctrllimited="true" ctrlrange="0 0.05" forcelimited="true" forcerange="-8 8"/>
   </actuator>
 </mujoco>'''
 
@@ -100,12 +109,14 @@ def xml_model():
 def validate_structure():
     """Structure check works even where MuJoCo wheels cannot be downloaded."""
     root=ET.fromstring(xml_model())
-    names=[x.get('name') for x in root.findall('.//joint') if x.get('name')]
+    names=[x.get('name') for x in root.findall('.//worldbody//joint') if x.get('name')]
     actuators=[x.get('name') for x in root.findall('.//actuator/position')]
     free=[x.get('name') for x in root.findall('.//freejoint')]
     geom={x.get('name') for x in root.findall('.//geom')}
     assert set(JOINT_NAMES)==set(names), (JOINT_NAMES,names)
     assert set(ACTUATOR_NAMES)==set(actuators)
+    assert len(root.findall('.//equality/joint'))==1
+    assert len(root.findall('.//tendon/fixed'))==1
     assert free==['free_red','free_green','free_blue']
     assert set(FINGER_GEOMS+OBJECT_GEOMS).issubset(geom)
     assert all(x.get('forcelimited')=='true' for x in root.findall('.//actuator/position'))

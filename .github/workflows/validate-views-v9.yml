@@ -1,0 +1,131 @@
+name: Seizo detailed views v9 validation
+on:
+  push:
+    branches: [seizo-view-exploration-v9]
+    paths: [.github/workflows/validate-views-v9.yml, scripts/assemble_views_v9.py, scripts/prepare_views_v9_release.py, ci/views-v9/**]
+permissions:
+  contents: read
+jobs:
+  validate:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+    env:
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '1'
+      SEIZO_PHYSICS_ENGINE: mujoco
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install pinned physics and build-only mesh tools
+        run: |
+          python -m pip install --disable-pip-version-check 'numpy==2.3.5' 'mujoco==3.3.7' 'trimesh==4.11.1' 'fast-simplification==0.2.0'
+      - name: Software OpenGL for GPU-less Windows test runner only
+        if: runner.os == 'Windows'
+        uses: f3d-app/install-mesa-windows-action@b78081f8331c5d49d71b221ca13a25fd97dac165
+        with:
+          path: ${{ env.pythonLocation }}
+          version: 23.3.5
+      - name: Linux RGB render dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libegl1 libegl-mesa0 libgl1-mesa-dri libgl1 libgles2
+          echo 'MUJOCO_GL=egl' >> "$GITHUB_ENV"
+          echo 'PYOPENGL_PLATFORM=egl' >> "$GITHUB_ENV"
+      - name: Assemble reviewed source
+        run: python scripts/assemble_views_v9.py
+      - name: Export shipped detailed arm and build deterministic visual assets
+        working-directory: Seizo_Learn
+        run: |
+          node tests/export_camera_parts.mjs
+          python tests/build_detail_assets.py | tee evidence/visual-build.json
+      - name: Full simulation, learning, views, save and security tests
+        working-directory: Seizo_Learn
+        run: |
+          set -o pipefail
+          python -m compileall -q core app.py bootstrap.py
+          python -m unittest discover -s tests -p 'test_*.py' -v 2>&1 | tee evidence/views-tests.txt
+          python tests/camera_http_smoke.py | tee evidence/views-http-result.json
+          node tests/gripper_model.mjs | tee evidence/geometry-check.json
+      - name: Actual browser test dependencies
+        if: runner.os == 'Linux'
+        run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+      - name: Actual WebGL view switching and train-stop-save workflow
+        if: runner.os == 'Linux'
+        working-directory: Seizo_Learn
+        run: python tests/browser_views_v9.py
+      - name: Package exact tested source and asset bytes
+        if: runner.os == 'Linux'
+        run: python scripts/prepare_views_v9_release.py
+      - uses: actions/upload-artifact@v4
+        if: success() && runner.os == 'Linux'
+        with:
+          name: seizo-v9-validated-source
+          path: release-source/
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: seizo-views-v9-${{ runner.os }}-evidence
+          path: Seizo_Learn/evidence/
+          retention-days: 7
+  stage-verified-source:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: seizo-view-exploration-v9
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v4
+        with:
+          name: seizo-v9-validated-source
+          path: release-source
+      - name: Stage verified files on isolated branch, not the desktop release
+        run: |
+          python - <<'PY'
+          import json,hashlib,shutil
+          from pathlib import Path
+          r=Path('release-source')
+          for name,expected in json.loads((r/'hashes.json').read_text()).items():
+              src=r/'patches'/name
+              assert hashlib.sha256(src.read_bytes()).hexdigest()==expected,name
+              dest=Path('patches')/name
+              dest.parent.mkdir(parents=True,exist_ok=True)
+              shutil.copyfile(src,dest)
+          PY
+          git config user.name 'Seizo validation'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add patches
+          git commit -m 'Validated detailed simulated views and capped exploration; no stable publication yet'
+          python - <<'PY'
+          import json,subprocess
+          from pathlib import Path
+          commit=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
+          hashes=json.loads(Path('release-source/hashes.json').read_text())
+          manifest={'schema':'seizo-desktop-manifest/v1','version':'2026.10.15-views-exploration-v9','base':json.loads(Path('release-source/base.json').read_text()),'patches':{name:{'url':f'https://raw.githubusercontent.com/gmaxdragon/seizo/{commit}/patches/{name}','sha256':h} for name,h in hashes.items()}}
+          Path('desktop_manifest.json').write_text(json.dumps(manifest,separators=(',',':'))+'\n')
+          print('Immutable tested source:',commit,'Files:',len(hashes))
+          PY
+          git add desktop_manifest.json
+          git commit -m 'Prepare pinned v9 manifest on isolated branch; stable promotion requires review'
+          git push origin HEAD:seizo-view-exploration-v9
+          git rev-parse HEAD

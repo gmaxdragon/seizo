@@ -2,7 +2,7 @@ name: Seizo simulated camera updater validation
 on:
   push:
     branches: [seizo-camera-updater-v8]
-    paths: [.github/workflows/validate-camera-v8.yml]
+    paths: [.github/workflows/validate-camera-v8.yml, ci/browser_camera_v8.py, scripts/assemble_camera_v8.py]
 permissions:
   contents: read
 jobs:

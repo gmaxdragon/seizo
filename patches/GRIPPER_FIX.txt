@@ -1,0 +1,18 @@
+SEIZO GRIPPER v5
+
+Use your EXISTING START_SEIZO.bat. No new folder is required.
+1. In the current app click STOP & save. Wait for saving, then close its terminal.
+2. Reopen START_SEIZO.bat with internet so it checks the desktop update channel.
+3. Find Gripper check on the main page. Select Open / close, then Check gripper.
+4. Select Wrist turn, then Check gripper. The whole tool turns; the opening holds.
+5. Select Contact squeeze, then Check gripper. The fixed test block resists closure;
+   the bounded closing request continues until reopening. This is NOT AI training.
+STOP cancels playback. The first three arm axes stay fixed only during these checks.
+
+Do not use the saved policy to drive a physical robot. This application has no
+hardware-control backend. The old policy is archived before a fresh v5 policy
+is initialized. Your API key remains in its existing Windows account storage.
+
+The model uses five simulated actuators: 3 main arm + 1 wrist + 1 linked gripper.
+Positions, shaft direction, force limits and compliance are still uncalibrated.
+No need for an API key or a cloud request to test the mechanism or train locally.

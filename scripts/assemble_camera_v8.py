@@ -26,6 +26,10 @@ for name,change in source['changes'].items():
     data=text.encode('utf-8')
     assert hashlib.sha256(data).hexdigest()==change['sha256'],'Changed source mismatch: '+name
     target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(data)
+# Explicit test-only revision. The application's CSP remains strict and unchanged.
+browser_test=(ROOT/'ci/browser_camera_v8.py').read_bytes()
+assert hashlib.sha256(browser_test).hexdigest()=='227cb6ac00c88d69c93583e513a3b0a47df8efa87af69b0c8bf0b9c6b2e0e02d'
+(app/'tests/browser_camera_v8.py').write_bytes(browser_test)
 (app/'evidence').mkdir(exist_ok=True)
 (ROOT/'camera-v8-paths.json').write_text(json.dumps(list(source['changes']),indent=2)+'\n')
 print('Verified',len(source['changes']),'source files. No Pi, Railway or physical motor access.')

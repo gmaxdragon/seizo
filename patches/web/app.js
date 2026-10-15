@@ -24,19 +24,24 @@ async function api(path,body){
 function say(s,error=false){$('status').textContent=s;$('status').className=error?'error':'';}
 function fail(e){say(e.message||String(e),true);}
 function task(){const s=$('task').value;return TASKS.includes(s)?s:s==='all'?TASKS[Math.floor(Math.random()*TASKS.length)]:TASKS[status?.stage||0];}
-let cameraURLs={},lastCameraSerial=-1;
+let cameraURLs={},lastCameraSerial=-1,focusedCamera=null;
+const CAMERA_NAMES=['overhead','wrist','side','front'];
 function cameraFrames(frame){
  const c=frame?.cameras;if(!c)return;
- for(const [name,id] of [['overhead','overheadFrame'],['wrist','wristFrame']]){
+ for(const [name,id] of CAMERA_NAMES.map(name=>[name,name+'Frame'])){
   if(!c[name])continue;
   if(cameraURLs[name])URL.revokeObjectURL(cameraURLs[name]);
   const bytes=Uint8Array.from(atob(c[name]),c=>c.charCodeAt(0));
   cameraURLs[name]=URL.createObjectURL(new Blob([bytes],{type:'image/png'}));$(id).src=cameraURLs[name];
+  const offered=(c.policy_camera_names||['overhead','wrist']).includes(name);
+  $(id).parentElement.classList.toggle('masked',!offered);
+  $(id).parentElement.title=offered?'Available to the learner for this attempt':'Not available to the learner in this attempt';
+  if(focusedCamera===name)$('focusImage').src=cameraURLs[name];
  }
  const p=c.settings||{};
- $('cameraState').textContent=`Policy input: ONLY these two RGB frames + their previous frames + task instructions. Setup: ${p.profile||'unknown'}; overhead ${p.overhead_fovy?.toFixed(0)||'?'}° FOV. ${frame.safety_abort?'Trial aborted: '+frame.safety_abort+'.':''}`;
+ $('cameraState').textContent=`This attempt uses: ${(c.policy_camera_names||['overhead','wrist']).join(', ')}. Setup: ${p.profile||'unknown'}. Scored evaluation always masks both helper views. ${frame.safety_abort?'Trial aborted: '+frame.safety_abort+'.':''}`;
 }
-function controls(){const unavailable=!connected;const active=['training','stopping','evaluating','watching'].includes(status?.status);$('train').disabled=unavailable||active||busy;$('watch').disabled=unavailable||!graphicsReady||active||busy;$('evaluate').disabled=unavailable||active||busy;$('task').disabled=unavailable||active||busy;$('gripperCheck').disabled=unavailable||!graphicsReady||active||busy;$('reviewAI').disabled=unavailable||active||busy;}
+function controls(){const unavailable=!connected;const active=['training','stopping','evaluating','watching'].includes(status?.status);$('train').disabled=unavailable||active||busy;$('watch').disabled=unavailable||!graphicsReady||active||busy;$('evaluate').disabled=unavailable||active||busy;$('task').disabled=unavailable||active||busy;$('gripperCheck').disabled=unavailable||!graphicsReady||active||busy;$('reviewAI').disabled=unavailable||active||busy;$('viewMode').disabled=unavailable||active||busy;$('saveViews').disabled=unavailable||active||busy;}
 function show(f){
  latestFrame=f;cameraFrames(f);if(f.diagnostic)$('cameraState').textContent='Scripted mechanism check: camera learning is inactive. The images above retain the last policy observation.';if(!view||!graphicsReady)return;view.show(f);
  const selected=f.objects[f.selected_object],roll=((f.pose.wrist%360)+360)%360;
@@ -54,7 +59,7 @@ function frame(t){
  if(play&&play.generation===epoch){
   play.at+=dt;const ms=+$('speed').value;
   const fs=play.trace.frames;
-  if(play.index<fs.length-1)show(fs[play.index]);
+  // Render a recorded observation only when playback advances, not 60 times per second.
   if(play.at>=ms){play.at=0;play.index++;
    if(play.index<fs.length){show(fs[play.index]);$('overlay').textContent=`${play.label} · move ${play.index}/${fs.length-1}`;}
    else{const p=play;play=null;$('outcome').textContent=p.trace.diagnostic?p.trace.diagnostic_message:p.trace.fault?'Trial stopped on an injected fault. This is a supervisor test, not learned safety.':p.trace.success?'This virtual trial reached its success criteria. Check progress tests more fresh scenes.':'This trial did not succeed. No scripted rescue or replacement was used.';}
@@ -69,10 +74,11 @@ $('stop').onclick=async()=>{epoch++;play=null;say('Displayed movement stopped. S
 $('watch').onclick=async()=>{busy=true;controls();const id=++epoch;play=null;say('Running a frozen virtual-policy trial...');try{const tr=await api('/api/trial',{task:task(),source:$('source').value,fault:$('fault').checked});if(id!==epoch)return;begin(tr,tr.policy_updates?'Updated policy, skill not guaranteed':'Untrained neural policy: random exploration');say(tr.policy_updates?'Testing updated policy weights. Improvement is not guaranteed. No learning during this test.':'Watching the untrained policy. It has not learned yet.');}catch(e){fail(e)}finally{busy=false;controls()}};
 $('evaluate').onclick=async()=>{epoch++;play=null;try{say('Testing ALL seven tasks and paired random baselines. No cloud calls or weight updates.');await api('/api/evaluate',{task:'all',trials:+$('evalTrials').value});await poll()}catch(e){fail(e)}};
 let polling=false;
-async function poll(){if(polling||closed)return;polling=true;try{status=await api('/api/status');connected=true;$('connection').textContent='Local app connected · '+location.host;$('connection').className='online';let s=status;if(s.live_camera&&s.live_camera.serial!==lastCameraSerial){lastCameraSerial=s.live_camera.serial;cameraFrames(s.live_camera);}const nf=n=>Number(n).toLocaleString();$('physicsBadge').textContent=s.build+' · '+s.physics;$('progress').textContent=`${nf(s.episodes)} / ${nf(s.target_episodes)} completed episodes · ${nf(s.moves)} movements · ${nf(s.updates)} network updates`;$('saveStatus').textContent=s.save_verified&&s.saved_fingerprint===s.policy_fingerprint?
+async function poll(){if(polling||closed)return;polling=true;try{status=await api('/api/status');connected=true;$('connection').textContent='Local app connected · '+location.host;$('connection').className='online';let s=status;if(!play&&s.live_camera&&s.live_camera.serial!==lastCameraSerial){lastCameraSerial=s.live_camera.serial;cameraFrames(s.live_camera);}const nf=n=>Number(n).toLocaleString();$('physicsBadge').textContent=s.build+' · '+s.physics;$('progress').textContent=`${nf(s.episodes)} / ${nf(s.target_episodes)} completed episodes · ${nf(s.moves)} movements · ${nf(s.updates)} network updates`;$('saveStatus').textContent=s.save_verified&&s.saved_fingerprint===s.policy_fingerprint?
   `Saved and verified by reload: ${new Date(s.last_saved*1000).toLocaleTimeString()} · policy ${s.saved_fingerprint.slice(0,10)}. Safe to close after the run is idle.`:
   (s.status==='stopping'?'Not finished saving yet. Keep the terminal open.':'Current changes are not yet checkpointed. STOP & save before closing.');
  $('bar').max=s.target_episodes;$('bar').value=s.episodes;
+ if(s.view_curriculum){const v=s.view_curriculum;$('viewStage').textContent=`${v.label}. ${v.mode==='auto'?'Automatic view curriculum.':'Manual practice-view setting.'} Tests: wrist + overhead only. No skill is certified by the stage name.`;if(document.activeElement!==$('viewMode'))$('viewMode').value=v.mode;const m=s.motion_feedback;$('discoveryFeedback').textContent=`Early exploration bonus: fades to zero by episode 500. ${m?`Last sampled new-cell bonus ${Number(m.discovery_bonus||0).toFixed(3)}; task reward ${Number(m.task_reward||0).toFixed(3)}.`:''} Only new actual movement earns the capped bonus.`;}
  if(s.status==='training'){say(`Practising ${s.lesson}. This is the current lesson, not a pass. ${s.episodes<1?'Exploring before the first completed episode.':''}`);let tr=s.trace;if(graphicsReady&&!play&&tr&&tr.id!==lastId){lastId=tr.id;begin(tr,`Training exploration from episode ${nf(tr.episode)}`);}let eta=s.estimated_seconds_remaining;$('outcome').textContent=`Showing a sampled trial, not every background movement. ${eta?`At the measured rate, remaining budget is about ${Math.ceil(eta/3600)} hours (rough estimate).`:''}`;}
  else if(s.status==='stopping')say('Stop requested. Waiting for the current operation to stop and the checkpoint to verify...');
  else if(s.status==='evaluating')say(`Frozen evaluation: ${s.evaluation_progress?.phase||'starting'} · ${s.evaluation_progress?.completed||0}/${s.evaluation_progress?.total||7} tasks. No learning or API calls.`);
@@ -87,7 +93,7 @@ async function poll(){if(polling||closed)return;polling=true;try{status=await ap
  if(s.evaluation&&evaluationStamp!==evalSeen){
   evalSeen=evaluationStamp;const e=s.evaluation,box=$('evaluation');box.replaceChildren();
   const matches=e.policy_fingerprint===s.policy_fingerprint&&JSON.stringify(e.camera_config||{})===JSON.stringify(s.camera_config||{});
-  const heading=document.createElement('p');heading.textContent=`${matches?'CURRENT policy evaluation':'OLDER evaluation: policy or camera settings changed'}. At ${e.episodes_at_test} episodes: ${e.current.successes}/${e.current.trials} successful trials. This is not proof of mastery. Evaluation itself changed no weights: ${e.fingerprint_unchanged}.`;box.append(heading);
+  const heading=document.createElement('p');heading.textContent=`${matches?'CURRENT policy evaluation':'OLDER evaluation: policy or camera settings changed'}. Wrist + overhead ONLY, no helper views. At ${e.episodes_at_test} episodes: ${e.current.successes}/${e.current.trials} successful trials. This is not proof of mastery. Evaluation itself changed no weights: ${e.fingerprint_unchanged}.`;box.append(heading);
   const table=document.createElement('table');const head=document.createElement('tr');
   for(const text of ['Task','Policy success','Random success','95% interval']){let cell=document.createElement('th');cell.textContent=text;head.append(cell)}table.append(head);
   for(const r of e.by_task||[]){const tr=document.createElement('tr'),c=r.current,ci=c.success_interval_95;
@@ -163,3 +169,14 @@ $('applyCameras').onclick=async()=>{
  }catch(e){fail(e)}
 };
 $('sampleCameras').onclick=async()=>{try{const frame=await api('/api/cameras/preview',{});show(frame);say('Another bounded simulated camera setup. No training was started.')}catch(e){fail(e)}};
+
+for(const button of document.querySelectorAll('.cameraSelect'))button.onclick=()=>{
+ focusedCamera=button.dataset.view;$('cameraFocus').hidden=false;$('focusTitle').textContent=focusedCamera+' view';
+ if(cameraURLs[focusedCamera])$('focusImage').src=cameraURLs[focusedCamera];
+ $('cameraFocus').scrollIntoView({block:'nearest'});
+};
+$('closeFocus').onclick=()=>{focusedCamera=null;$('cameraFocus').hidden=true;};
+$('saveViews').onclick=async()=>{try{
+ await api('/api/views/config',{mode:$('viewMode').value});
+ show(await api('/api/cameras/preview',{}));await poll();say('Practice views saved. All scored tests still use only wrist and overhead.');
+ }catch(e){fail(e)}};

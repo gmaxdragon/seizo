@@ -13,7 +13,7 @@ from core.runner import Runner,World
 from core.cloud import HackClubPlanner
 
 ROOT=Path(__file__).resolve().parent
-BUILD='seizo-camera-learning-v8.1';PORT=8772
+BUILD='seizo-detailed-views-v9';PORT=8772
 
 class DataLock:
     def __init__(self,path):
@@ -122,6 +122,8 @@ def make_handler(runner,token,quit_event,cloud,instance_id='test-instance'):
                     result=run_check(data.get('mode','open_close'))
                 elif path=='/api/evaluate':
                     keys(('task','trials'));result=runner.begin_evaluation(data.get('task','all'),data.get('trials',20))
+                elif path=='/api/views/config':
+                    keys(('mode',));result=runner.set_views(data.get('mode','auto'))
                 elif path=='/api/cameras/config':
                     keys(('profile','overhead_height_m','overhead_side_m','wrist_mount','frame_faults'))
                     result=runner.set_cameras(data)
@@ -157,9 +159,8 @@ def make_handler(runner,token,quit_event,cloud,instance_id='test-instance'):
 
 def default_runner(data_dir):
     """Production uses ONLY fake-camera observations; no opt-in or truth fallback."""
-    from core.camera_policy import Agent as CameraAgent
-    from core.camera_world import CameraWorld
-    return Runner(Path(data_dir)/'camera_pixels_v8',agent_factory=CameraAgent,world_factory=CameraWorld)
+    from core.view_runner import ViewRunner
+    return ViewRunner(Path(data_dir)/'camera_views_v9')
 
 
 def main():
@@ -184,7 +185,7 @@ def main():
     try:
         # Existing state policies and shared credentials remain untouched.
         runner=default_runner(a.data_dir)
-        print('Input mode: SIMULATED OVERHEAD + WRIST RGB. Training and evaluation use the same camera-only policy.',flush=True)
+        print('Input mode: DETAILED SIMULATED VIEWS. Helper views during exploration; all scored tests use wrist + overhead only.',flush=True)
         cloud=HackClubPlanner(audit_path=a.data_dir/'api_usage.json');token=secrets.token_urlsafe(32)
         try:
             if os.name=='nt':

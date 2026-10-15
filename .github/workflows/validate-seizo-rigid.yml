@@ -20,6 +20,7 @@ jobs:
         run: |
           tar -xJf Seizo_Learn_Web.tar.xz
           cp patches/core/*.py Seizo_Learn/core/
+          mkdir -p Seizo_Learn/tests
           cp patches/tests/test_mujoco_physics.py Seizo_Learn/tests/
           cp patches/bootstrap.py Seizo_Learn/bootstrap.py
           cp patches/web/app.js Seizo_Learn/web/app.js

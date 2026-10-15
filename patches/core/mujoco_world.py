@@ -49,8 +49,10 @@ class MuJoCoWorld(base.World):
         self._command(data,q)
 
     def _command(self,data,q):
+        # Five PHYSICAL actuator commands: 3 steppers, wrist servo, ONE gripper
+        # servo coupled to both jaw slides. No fictitious second gripper motor.
         joint_target=(q[0]*RAD,q[1]*RAD,(q[2]-q[1])*RAD,q[3]*RAD,
-                      float(np.clip(q[4]*.025,0,.025)),float(np.clip(q[4]*.025,0,.025)))
+                      float(np.clip(q[4]*.05,0,.05)))
         for name,value in zip(ACTUATOR_NAMES,joint_target):
             data.ctrl[self.aid[name]]=value
 

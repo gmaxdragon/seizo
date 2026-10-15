@@ -22,6 +22,8 @@ jobs:
           cp patches/core/*.py Seizo_Learn/core/
           mkdir -p Seizo_Learn/tests
           cp patches/tests/test_mujoco_physics.py Seizo_Learn/tests/
+          cp patches/tests/test_mujoco_integration.py Seizo_Learn/tests/
+          cp patches/app.py Seizo_Learn/app.py
           cp patches/bootstrap.py Seizo_Learn/bootstrap.py
           cp patches/web/app.js Seizo_Learn/web/app.js
           cp patches/web/index.html Seizo_Learn/web/index.html
@@ -32,4 +34,6 @@ jobs:
         env:
           SEIZO_PHYSICS_ENGINE: mujoco
           PYTHONPATH: .
-        run: python -m unittest discover -s tests -p 'test_mujoco_physics.py' -v
+        run: |
+          python -m unittest discover -s tests -p 'test_mujoco_physics.py' -v
+          python -m unittest discover -s tests -p 'test_mujoco_integration.py' -v

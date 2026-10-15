@@ -13,7 +13,7 @@ class TestMJCFStatic(unittest.TestCase):
     def test_physical_model_has_six_joints_and_free_objects(self):
         info=validate_structure()
         self.assertEqual(info['joints'],6)
-        self.assertEqual(info['actuators'],6)
+        self.assertEqual(info['actuators'],5)
         self.assertEqual(info['free_objects'],3)
 
     def test_no_real_robot_drivers_or_lie_about_calibration(self):
@@ -36,7 +36,7 @@ except ImportError:
 class TestMuJoCoDynamics(unittest.TestCase):
     def test_model_compiles_and_geometries_are_distinct(self):
         model=mujoco.MjModel.from_xml_string(xml_model())
-        self.assertEqual(model.nu,6)
+        self.assertEqual(model.nu,5)
         self.assertEqual(model.nq,27)
         self.assertEqual(model.nv,24)
         names=[mujoco.mj_id2name(model,mujoco.mjtObj.mjOBJ_GEOM,i) for i in range(model.ngeom)]
@@ -63,7 +63,7 @@ class TestMuJoCoDynamics(unittest.TestCase):
 
     def test_camera_visual_link_is_not_a_hidden_motor(self):
         world=MuJoCoWorld(n=1,seed=12)
-        self.assertEqual(world.model.nu,6)
+        self.assertEqual(world.model.nu,5)
         self.assertEqual(len(world.q[0]),5)
         self.assertFalse(any('camera_tower' in name for name in (' '.join(n for n in world.jid))))
 

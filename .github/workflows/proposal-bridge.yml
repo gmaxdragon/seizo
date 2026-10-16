@@ -5,48 +5,85 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: seizo-proposal-dev
+  cancel-in-progress: false
 jobs:
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: write
     env:
       MUJOCO_GL: egl
       OPENBLAS_NUM_THREADS: '1'
       OMP_NUM_THREADS: '1'
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: seizo-proposal-bridge-20261015
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Apply exact locally tested integration to development branch only
+        shell: python
+        run: |
+          import hashlib, json, os, pathlib, subprocess
+          assert os.environ['GITHUB_REF'] == 'refs/heads/seizo-proposal-bridge-20261015'
+          expected = json.loads(pathlib.Path('tools/proposal-integration-sha256.json').read_text())
+          def matches():
+              return all(hashlib.sha256((pathlib.Path('patches')/name).read_bytes()).hexdigest() == sha for name, sha in expected.items())
+          if not matches():
+              subprocess.run(['git','apply','--check','tools/proposal-integration.patch'],check=True)
+              subprocess.run(['git','apply','tools/proposal-integration.patch'],check=True)
+          assert matches(), 'Integration bytes differ from locally tested files'
       - name: Assemble existing pinned application without user data
         shell: python
         run: |
           import hashlib, json, pathlib, shutil, tarfile
-          root = pathlib.Path('.')
-          manifest = json.loads((root/'desktop_manifest.json').read_text())
-          archive = root/'Seizo_Learn_Web.tar.xz'
-          assert hashlib.sha256(archive.read_bytes()).hexdigest() == manifest['base']['sha256']
-          dest = root/'bridge-runtime'
-          dest.mkdir()
-          with tarfile.open(archive, 'r:xz') as tf:
-              tf.extractall(dest, filter='data')
-          candidates = [p.parent for p in dest.rglob('app.py') if (p.parent/'core').is_dir()]
-          assert len(candidates) == 1, candidates
-          app = candidates[0]
-          shutil.copytree(root/'patches', app, dirs_exist_ok=True)
+          root=pathlib.Path('.')
+          manifest=json.loads((root/'desktop_manifest.json').read_text())
+          archive=root/'Seizo_Learn_Web.tar.xz'
+          assert hashlib.sha256(archive.read_bytes()).hexdigest()==manifest['base']['sha256']
+          dest=root/'bridge-runtime';dest.mkdir()
+          with tarfile.open(archive,'r:xz') as tf:
+              tf.extractall(dest,filter='data')
+          candidates=[p.parent for p in dest.rglob('app.py') if (p.parent/'core').is_dir()]
+          assert len(candidates)==1,candidates
+          app=candidates[0]
+          shutil.copytree(root/'patches',app,dirs_exist_ok=True)
           (root/'runtime-path.txt').write_text(str(app))
-          if (app/'tests/test_proposal_bridge.py').exists():
-              print('Proposal implementation present; validation required.')
-      - name: Install simulator test dependencies
-        run: python -m pip install numpy mujoco pillow playwright
-      - name: Validate proposal implementation when present
+          assert (app/'tests/test_proposal_bridge.py').is_file()
+      - name: Install simulation and browser test dependencies
+        run: |
+          python -m pip install numpy mujoco pillow playwright
+          python -m playwright install --with-deps chromium
+      - name: Run full application regression suite
         shell: bash
         run: |
-          APP=$(cat runtime-path.txt)
-          if [ -f "$APP/tests/test_proposal_bridge.py" ]; then
-            cd "$APP"
-            python -m unittest discover -s tests -p 'test_proposal*.py' -v 2>&1 | tee proposal-tests.txt
-            test ${PIPESTATUS[0]} -eq 0
+          set -o pipefail
+          cd "$(cat runtime-path.txt)"
+          python -m unittest discover -s tests -p 'test_*.py' -v 2>&1 | tee proposal-full-tests.txt
+      - name: Real browser proposal and STOP test
+        shell: bash
+        run: |
+          set -o pipefail
+          cd "$(cat runtime-path.txt)"
+          node --input-type=module --check < web/proposal_ui.js
+          node --input-type=module --check < web/app.js
+          python tests/browser_proposal_bridge.py 2>&1 | tee proposal-browser-tests.txt
+      - name: Publish only verified integration files on this development branch
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/seizo-proposal-bridge-20261015
+          git add -- patches/app.py patches/core/cloud.py patches/core/runner.py patches/web/app.js patches/web/index.html patches/tests/test_camera_release.py
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'Integrate validated no-motion proposal bridge into existing desktop app'
+            git push origin HEAD:refs/heads/seizo-proposal-bridge-20261015
           fi
       - uses: actions/upload-artifact@v4
         if: always()

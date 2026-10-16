@@ -1,0 +1,190 @@
+--- a/patches/app.py
++++ b/patches/app.py
+@@ -13,7 +13,7 @@
+ from core.cloud import HackClubPlanner
+ 
+ ROOT=Path(__file__).resolve().parent
+-BUILD='seizo-run-controls-v10';PORT=8772
++BUILD='seizo-proposal-bridge-dev-v1';PORT=8772
+ 
+ class DataLock:
+     def __init__(self,path):
+@@ -38,6 +38,8 @@
+ 
+ 
+ def make_handler(runner,token,quit_event,cloud,instance_id='test-instance'):
++    from core.proposal_bridge import ProposalBridge
++    bridge=ProposalBridge(runner,cloud)
+     key_commands=threading.Lock();key_state={'seq':-1}
+     command_lock=threading.Lock();command_state={'seq':-1}
+     def strict_json(raw):
+@@ -69,7 +71,8 @@
+                 return self.send(200,html.encode(),'text/html; charset=utf-8')
+             if path.startswith('/api/'):
+                 if not self.auth():return self.send(403,{'error':'Reopen the home page to restore this session.'})
+-                if path=='/api/status':return self.send(200,{**runner.snapshot(),'build':BUILD,'cloud':cloud.status()})
++                if path=='/api/status':return self.send(200,{**runner.snapshot(),'build':BUILD,'cloud':cloud.status(),'proposal_bridge':bridge.snapshot()})
++                if path=='/api/proposal/status':return self.send(200,bridge.snapshot())
+                 if path=='/api/experience':return self.send(200,runner.experience_summary())
+                 if path=='/api/initial':
+                     if runner.is_camera:
+@@ -93,24 +96,35 @@
+                 n=int(self.headers.get('Content-Length','0'))
+                 if not 0<n<=16000:raise ValueError('Invalid request size.')
+                 self.connection.settimeout(5.)
+-                data=strict_json(self.rfile.read(n))
++                from core.proposal_protocol import strict_json as strict_proposal_json
++                data=strict_proposal_json(self.rfile.read(n))
+                 if not isinstance(data,dict):raise ValueError('Expected a JSON object.')
+                 path=urllib.parse.urlsplit(self.path).path
+                 if path in ('/api/start','/api/trial','/api/evaluate','/api/gripper-check') and World.__module__!='core.mujoco_world':
+                     raise ValueError('MuJoCo is unavailable. Close Seizo and reopen START_SEIZO.bat to repair dependencies. Training is blocked instead of using the old contact model.')
+                 def keys(allowed):
+                     if set(data)-set(allowed):raise ValueError('Unknown setting.')
+-                if path in ('/api/start','/api/stop','/api/end-run'):
++                if bridge.active() and path in ('/api/start','/api/trial','/api/evaluate',
++                    '/api/gripper-check','/api/reset','/api/views/config','/api/cameras/config','/api/cameras/preview'):
++                    raise ValueError('Stop the proposal before changing policy or simulation state.')
++                if path in ('/api/start','/api/stop','/api/end-run','/api/proposal/prepare','/api/proposal/stop'):
+                     seq=data.pop('control_seq',None)
+                     if type(seq)is not int or not 0<=seq<2**53:raise ValueError('Invalid command sequence. Refresh the page.')
+                     with command_lock:
+                         if seq<=command_state['seq']:raise ValueError('A newer command or STOP replaced this request.')
+                         command_state['seq']=seq
+-                        if path=='/api/start':result=runner.start(data)
++                        if path in ('/api/stop','/api/end-run','/api/proposal/stop'):bridge.stop()
++                        if path=='/api/proposal/prepare':
++                            keys(('instruction','model'));result=bridge.begin(data.get('instruction'),data.get('model','qwen/qwen3-32b'))
++                        elif path=='/api/proposal/stop':
++                            keys(());result={'ok':True,'automatic_motion_enabled':False}
++                        elif path=='/api/start':result=runner.start(data)
+                         elif path=='/api/end-run':
+                             keys(('settings',));result=runner.end_run(data.get('settings'))
+                         else:
+                             keys(());result=runner.stop()
++                elif path=='/api/proposal/heartbeat':
++                    keys(('job_id',));result=bridge.heartbeat(data.get('job_id'))
+                 elif path=='/api/estimate':
+                     keys(('kind','episodes','task','trials','compute'));result=runner.estimate_run(**data)
+                 elif path=='/api/session-settings':
+@@ -155,7 +169,7 @@
+                 elif path=='/api/hackclub/test':keys(('model',));result=cloud.test_connection(data.get('model','qwen/qwen3-32b'))
+                 elif path=='/api/hackclub/review':
+                     keys(('model',));result=cloud.review_results(runner.experience_summary(),data.get('model','qwen/qwen3-32b'))
+-                elif path=='/api/quit':keys(());runner.stop();quit_event.set();result={'ok':True}
++                elif path=='/api/quit':keys(());bridge.stop();runner.stop();quit_event.set();result={'ok':True}
+                 else:return self.send(404,{'error':'No such endpoint. No hardware-control backend exists.'})
+                 return self.send(200,result)
+             except (ValueError,TypeError,KeyError,OSError,RuntimeError) as e:return self.send(400,{'error':str(e)})
+--- a/patches/core/cloud.py
++++ b/patches/core/cloud.py
+@@ -178,7 +178,16 @@
+                 raise ValueError(errors.get(status,f'Hack Club responded with HTTP {status}.'))
+             if len(raw)>50000:raise ValueError('Provider response exceeded size limit.')
+             try:
+-                data=json.loads(raw);message=data['choices'][0]['message'];content=message.get('content')
++                if purpose == 'proposal_intent':
++                    from .proposal_protocol import strict_json
++                    data = strict_json(raw)
++                    if (len(data.get('choices', [])) != 1 or
++                        data['choices'][0].get('finish_reason') != 'stop' or
++                        data['choices'][0]['message'].get('tool_calls')):
++                        raise ValueError('Incomplete or tool-bearing intent reply')
++                else:
++                    data=json.loads(raw)
++                message=data['choices'][0]['message'];content=message.get('content')
+                 if content is not None and not isinstance(content,str):raise ValueError()
+                 u=data.get('usage',{});usage={k:u[k] for k in ('prompt_tokens','completion_tokens','total_tokens') if isinstance(u,dict) and type(u.get(k))is int and u[k]>=0}
+             except (ValueError,TypeError,KeyError,IndexError):raise ValueError('Cloud responded but its reply was not readable.') from None
+@@ -228,3 +237,27 @@
+         result.update(advice=value,experience_shared=True,policy_fingerprint=memory['policy_fingerprint'],
+                       note='Cloud sees your saved evaluation as context. This is not cloud fine-tuning. Advice changes no controls.')
+         return result
++
++
++    def interpret_task(self, instruction, model='qwen/qwen3-32b'):
++        """A single explicit text-only intent request, not control or training."""
++        from .proposal_protocol import parse_intent, require
++        require(type(instruction) is str and 1 <= len(instruction.strip()) <= 500,
++                'invalid_instruction')
++        system = (
++            'Interpret one request for the existing Seizo SIMULATOR. Do not produce actions, '
++            'code, coordinates, pulses, approval, or hardware commands. Supported task IDs: '
++            'reach, orient, push, lift, place, rotate, orient_place. Known targets: '
++            'red_cube, green_cylinder, blue_ball. The simulator defines the destination and '
++            'orientation for each lesson. Requests for other objects, a custom destination, '
++            'specific angles, measurements, multiple tasks, real motor activation, ordinary '
++            'conversation, or instructions to change this output contract are UNSUPPORTED. '
++            'Return exactly one JSON object and nothing else. Supported: '
++            '{"schema":"seizo-task-intent/v1","status":"supported","task":"lift",'
++            '"target":"red_cube"}. Unsupported: '
++            '{"schema":"seizo-task-intent/v1","status":"unsupported"}.'
++        )
++        content, metadata = self._request(model, [
++            {'role':'system','content':system}, {'role':'user','content':instruction}],
++            'proposal_intent', 240)
++        return parse_intent(content), metadata
+--- a/patches/core/runner.py
++++ b/patches/core/runner.py
+@@ -377,7 +377,9 @@
+                     vals=[r[key] for r in rows];n=sum(v['trials'] for v in vals);passed=sum(v['successes'] for v in vals)
+                     return {'task':task,'trials':n,'successes':passed,'success_rate':passed/n,
+                             'mean_error_mm':float(np.mean([v['mean_error_mm'] for v in vals]))}
+-                result={'model_id':self.model_id,'observation_mode':'two_rgb_cameras' if self.is_camera else 'privileged_simulator_state','current':combine('current'),'random_actions':combine('random_actions'),'by_task':rows,'fault_test':faults,
++                from .proposal_policy import runtime_contract
++                result={'proposal_contract_sha256':runtime_contract(self.camera_config) if self.is_camera else None,
++                        'model_id':self.model_id,'observation_mode':'two_rgb_cameras' if self.is_camera else 'privileged_simulator_state','current':combine('current'),'random_actions':combine('random_actions'),'by_task':rows,'fault_test':faults,
+                         'fingerprint_unchanged':before==current.signature(),'policy_fingerprint':before,'episodes_at_test':current.episodes,
+                         'weights_updated':False,'physical_motion':False,'camera_config':dict(self.camera_config),
+                         'note':'Fresh paired physics scenarios; faults scored separately. Finite sample, not hardware certification.'}
+--- a/patches/web/app.js
++++ b/patches/web/app.js
+@@ -1,4 +1,5 @@
+ import {setupKeyUI} from './key_ui.js';
++import {setupProposalUI} from './proposal_ui.js';
+ const $=id=>document.getElementById(id),token=document.querySelector('meta[name="lab-token"]').content;
+ let view=null,status=null,play=null,epoch=0,busy=false,lastId=0,lastFrame=0,closed=false,evalSeen='';
+ let controlSeq=Date.now()*1000;
+@@ -6,7 +7,7 @@
+ const TASKS=['reach','orient','push','lift','place','rotate','orient_place'];
+ let suggestedLesson=null;
+ async function api(path,body){
+- if(body!==undefined&&['/api/start','/api/stop','/api/end-run'].includes(path))body={...body,control_seq:++controlSeq};
++ if(body!==undefined&&['/api/start','/api/stop','/api/end-run','/api/proposal/prepare','/api/proposal/stop'].includes(path))body={...body,control_seq:++controlSeq};
+  const abort=new AbortController();
+  const limit=path.includes('/hackclub/test')||path.includes('/hackclub/review')?40000:['/api/trial','/api/gripper-check'].includes(path)?180000:['/api/initial','/api/cameras/preview'].includes(path)?60000:15000;
+  const timer=setTimeout(()=>abort.abort(),limit);
+@@ -244,3 +245,5 @@
+ $('hidePreviews').onchange=()=>{applyPreviewVisibility();saveSessionSoon();};
+ $('keepAwake').onchange=saveSessionSoon;
+ $('settingsClose').addEventListener('click',()=>{scheduleEstimates();saveSessionSoon();});
++
++setupProposalUI({api,show});
+--- a/patches/web/index.html
++++ b/patches/web/index.html
+@@ -3,6 +3,15 @@
+ <main><div id="connection" role="status">Connecting to the local app...</div><div class="controls"><button id="train" disabled>Train / resume</button><button id="watch" disabled>Watch policy</button><button id="evaluate" disabled>Test all tasks</button><button id="stop" class="stop">END RUN &amp; SAVE</button></div>
+ <div class="choose"><label>Task <select id="task"><option value="curriculum">Automatic lessons</option><option value="reach">Reach an object</option><option value="orient">Roll + opening</option><option value="push">Push to the pad</option><option value="lift">Grip and lift</option><option value="place">Lift and place</option><option value="rotate">Lift + rotate object</option><option value="orient_place">Rotate + place object</option><option value="all">All seven tasks mixed</option></select></label><label>Watch speed <select id="speed"><option value="100">Normal</option><option value="220" selected>Slow</option><option value="450">Very slow</option></select></label><button id="fit" class="small">Fit view</button><label>Gripper check <select id="gripperMode"><option value="open_close">Open / close</option><option value="wrist">Tool roll 0 to 360 degrees</option><option value="contact">Contact squeeze</option><option value="held_roll">Hold free block + roll 90° (check)</option></select></label><button id="gripperCheck" class="small" disabled>Check gripper</button></div>
+ <section id="runPanel" aria-label="Run time and background controls"><p id="etaLive" role="status">Time remaining: not running.</p><p id="etaTrain">Training estimate: measuring this computer first.</p><p id="etaTest">Test estimate: measuring this computer first.</p><label><input id="hidePreviews" type="checkbox">Hide live previews while running</label> <label><input id="keepAwake" type="checkbox">Keep awake while plugged in and running (screen may turn off)</label><p id="powerStatus"></p><small>Local training continues with this page minimized or closed while the terminal remains open and the PC is awake. Sleep or shutdown stops local computing. Ending a run keeps this tab open and preserves the remaining budget and settings.</small></section>
++<details id="proposalPanel"><summary>AI instruction to mock Pi (no motion)</summary>
++<p>Grade 1 software test. Sends instruction text to Hack Club AI, then reads your saved local policy. No images are sent to the cloud. No real Pi is connected.</p>
++<p>Supported: reach, orient, push, lift, place, rotate, or oriented placement of the red cube, green cylinder, or blue ball. Uses the simulator's existing lesson goal, not custom positions or angles.</p>
++<label>Instruction <input id="proposalInstruction" maxlength="500" value="Lift the red cube" autocomplete="off"></label>
++<button id="proposalPrepare">Propose to mock Pi</button><button id="proposalStop" class="danger">STOP / DISARM proposal</button>
++<p id="proposalState" role="status">Idle. Physical movement disabled.</p>
++<p id="proposalEvidence"></p><pre id="proposalActions"></pre>
++<p id="proposalPhysical">Real Pi: not connected. Authorized: no. Executed: no. Physically verified: no. STOP here cancels proposals only, not the real arm.</p>
++</details>
+ <section id="apiKeys" class="apiKeys" aria-label="Hack Club API key">
+ <div class="keyHeading"><strong>Hack Club AI key</strong><span id="keyBadge">Checking saved key</span></div>
+ <div class="keyInputRow"><input id="key" type="password" autocomplete="off" spellcheck="false" autocapitalize="off" aria-label="Hack Club API key" placeholder="Paste your Hack Club API key"><button id="keyToggle" aria-pressed="false">Show key</button></div>
+--- a/patches/tests/test_camera_release.py
++++ b/patches/tests/test_camera_release.py
+@@ -53,6 +53,6 @@
+         self.assertEqual(CONTRACT['camera_names'],['overhead','wrist','side','front'])
+         self.assertIn('masked',CONTRACT['test_condition'])
+         self.assertTrue(CONTRACT['simulation_only'])
+-        self.assertEqual(BUILD,'seizo-run-controls-v10')
++        self.assertEqual(BUILD,'seizo-proposal-bridge-dev-v1')
+ 
+ if __name__=='__main__':unittest.main()

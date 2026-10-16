@@ -1,0 +1,161 @@
+name: Seizo v11 desktop release validation
+on:
+  push:
+    branches: [seizo-proposal-release-v11]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: seizo-v11-release
+  cancel-in-progress: false
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '1'
+      PYTHONUTF8: '1'
+      SEIZO_RELEASE_REPO: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Prepare bounded release changes
+        run: python tools/prepare_proposal_release_v11.py
+      - name: Assemble original application and patched source
+        shell: python
+        run: |
+          import hashlib,json,pathlib,shutil,tarfile
+          root=pathlib.Path('.')
+          manifest=json.loads((root/'desktop_manifest.json').read_text())
+          archive=root/'Seizo_Learn_Web.tar.xz'
+          assert hashlib.sha256(archive.read_bytes()).hexdigest()==manifest['base']['sha256']
+          dest=root/'release-runtime';dest.mkdir()
+          with tarfile.open(archive,'r:xz') as tf:tf.extractall(dest,filter='data')
+          app=dest/'Seizo_Learn'
+          assert (app/'app.py').is_file()
+          shutil.copytree(root/'patches',app,dirs_exist_ok=True)
+          (root/'runtime-path.txt').write_text(str(app))
+      - name: Linux software graphics and pinned physics
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libosmesa6 libgl1-mesa-dri libegl1 libegl-mesa0
+          python -m pip install 'numpy<3' 'mujoco==3.3.7' pillow playwright
+          python -m playwright install --with-deps chromium
+      - name: Windows numerical test dependency
+        if: runner.os == 'Windows'
+        run: python -m pip install 'numpy<3'
+      - name: Linux full regression and real browser
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          MUJOCO_GL: osmesa
+          PYOPENGL_PLATFORM: osmesa
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: |
+          set -euo pipefail
+          cd "$(cat runtime-path.txt)"
+          python -m unittest discover -s tests -p 'test_*.py' -v 2>&1 | tee v11-full-tests.txt
+          node --input-type=module --check < web/app.js
+          node --input-type=module --check < web/proposal_ui.js
+          python tests/browser_proposal_bridge.py 2>&1 | tee v11-browser-tests.txt
+      - name: Windows proposal updater and credential regression
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Set-Location (Get-Content runtime-path.txt)
+          python -m unittest discover -s tests -p 'test_proposal*.py' -v 2>&1 | Tee-Object v11-proposal-tests.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m unittest discover -s tests -p 'test_key_storage.py' -v 2>&1 | Tee-Object v11-credential-tests.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v11-evidence-${{ runner.os }}
+          path: |
+            release-runtime/Seizo_Learn/v11-*.txt
+            release-runtime/Seizo_Learn/evidence/
+            release-runtime/Seizo_Learn/proposal-integration-evidence.json
+            release-source-hashes.json
+            release-candidate-manifest.json
+          retention-days: 7
+  package:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: v11-evidence-*
+          path: verified-evidence
+      - name: Reproduce both tested source identities
+        run: python tools/prepare_proposal_release_v11.py
+      - name: Verify cross-platform hashes then commit pinned candidate on release branch only
+        shell: python
+        run: |
+          import hashlib,json,os,pathlib,subprocess,sys
+          root=pathlib.Path('.')
+          branch='seizo-proposal-release-v11'
+          assert os.environ['GITHUB_REF']=='refs/heads/'+branch
+          expected_sha=os.environ['GITHUB_SHA']
+          def git(*args):return subprocess.check_output(['git',*args],text=True).strip()
+          local=json.loads((root/'release-source-hashes.json').read_text())
+          for platform in ('Linux','Windows'):
+              found=json.loads((root/'verified-evidence'/('v11-evidence-'+platform)/'release-source-hashes.json').read_text())
+              assert local==found, 'Source differs from tested '+platform+' artifact'
+          remote=git('ls-remote','origin','refs/heads/'+branch).split()[0]
+          assert remote==expected_sha, 'Release branch changed during tests'
+          subprocess.run(['git','config','user.name','github-actions[bot]'],check=True)
+          subprocess.run(['git','config','user.email','41898282+github-actions[bot]@users.noreply.github.com'],check=True)
+          subprocess.run(['git','add','--','patches','seizo_updater.py','docs/PROPOSAL_BRIDGE_V11_RELEASE.md'],check=True)
+          subprocess.run(['git','commit','-m','Package tested Seizo v11 source; physical arm remains locked'],check=True)
+          source=git('rev-parse','HEAD')
+          sys.path.insert(0,str(root/'tools'))
+          from prepare_proposal_release_v11 import make_manifest
+          manifest=make_manifest(source)
+          (root/'desktop_manifest.json').write_text(json.dumps(manifest,separators=(',',':'))+'\n',encoding='utf-8')
+          import seizo_updater
+          seizo_updater.validated_manifest(manifest)
+          for name,entry in manifest['patches'].items():
+              assert hashlib.sha256((root/'patches'/name).read_bytes()).hexdigest()==entry['sha256']
+          proof={'version':manifest['version'],'source_commit':source,'tested_workflow_commit':expected_sha,
+                 'patch_tree':git('rev-parse','HEAD:patches'),'patch_count':len(manifest['patches']),
+                 'manifest_sha256':hashlib.sha256((root/'desktop_manifest.json').read_bytes()).hexdigest(),
+                 'source_hashes':local,'real_pi_connected':False,'automatic_motion_enabled':False,
+                 'authorized':False,'executed':False,'physically_verified':False,
+                 'note':'Linux and Windows tests passed; browser uses mocked intent and synthetic passing-score fixtures. Stable promotion is separate.'}
+          (root/'release-proof.json').write_text(json.dumps(proof,indent=2)+'\n')
+          subprocess.run(['git','add','desktop_manifest.json','release-proof.json'],check=True)
+          subprocess.run(['git','commit','-m','Pin verified v11 updater manifest without changing physical runtime'],check=True)
+          subprocess.run(['git','push','origin','HEAD:refs/heads/'+branch],check=True)
+          print(json.dumps({'candidate_commit':git('rev-parse','HEAD'),**proof}))
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: v11-release-candidate
+          path: |
+            desktop_manifest.json
+            release-proof.json
+            seizo_updater.py
+            patches/
+            docs/PROPOSAL_BRIDGE_V11_RELEASE.md
+            verified-evidence/
+          retention-days: 7

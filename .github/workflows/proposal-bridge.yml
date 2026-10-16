@@ -1,0 +1,58 @@
+name: Seizo proposal bridge (no motion)
+on:
+  push:
+    branches: [seizo-proposal-bridge-20261015]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      MUJOCO_GL: egl
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Assemble existing pinned application without user data
+        shell: python
+        run: |
+          import hashlib, json, pathlib, shutil, tarfile
+          root = pathlib.Path('.')
+          manifest = json.loads((root/'desktop_manifest.json').read_text())
+          archive = root/'Seizo_Learn_Web.tar.xz'
+          assert hashlib.sha256(archive.read_bytes()).hexdigest() == manifest['base']['sha256']
+          dest = root/'bridge-runtime'
+          dest.mkdir()
+          with tarfile.open(archive, 'r:xz') as tf:
+              tf.extractall(dest, filter='data')
+          candidates = [p.parent for p in dest.rglob('app.py') if (p.parent/'core').is_dir()]
+          assert len(candidates) == 1, candidates
+          app = candidates[0]
+          shutil.copytree(root/'patches', app, dirs_exist_ok=True)
+          (root/'runtime-path.txt').write_text(str(app))
+          if (app/'tests/test_proposal_bridge.py').exists():
+              print('Proposal implementation present; validation required.')
+      - name: Install simulator test dependencies
+        run: python -m pip install numpy mujoco pillow playwright
+      - name: Validate proposal implementation when present
+        shell: bash
+        run: |
+          APP=$(cat runtime-path.txt)
+          if [ -f "$APP/tests/test_proposal_bridge.py" ]; then
+            cd "$APP"
+            python -m unittest discover -s tests -p 'test_proposal*.py' -v 2>&1 | tee proposal-tests.txt
+            test ${PIPESTATUS[0]} -eq 0
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: seizo-proposal-runtime-source
+          path: |
+            bridge-runtime/
+            runtime-path.txt
+          retention-days: 7

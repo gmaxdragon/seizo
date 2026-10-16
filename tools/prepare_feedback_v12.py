@@ -14,6 +14,8 @@ edit('core/runner.py',"            self.stop_event.clear();self.error='';self.ev
      "            if not _inline:self.stop_event.clear()\n            self.error='';self.evaluation_progress={'phase':'Starting'")
 edit('core/session_runner.py',"    def begin_evaluation(self,task='all',trials=20,_inline=False):\n        self._reject_while_ending()",
      "    def begin_evaluation(self,task='all',trials=20,_inline=False):\n        if _inline and self.stop_event.is_set():return {'ok':False,'cancelled':True}\n        if not _inline:self._reject_while_ending()")
+edit('web/app.js',"'Historical results, not current proof. ')+rows.map",
+     "'Historical results, not current proof. ')+`Reference: ${(e.reference_kind||'unknown').replaceAll('_',' ')}. `+rows.map")
 # Recalculate integrity metadata for reviewed bytes, without weakening checks.
 p=ROOT/'patches/tests/preserved_source_hashes.json';h=json.loads(p.read_text())
 for name in ('core/runner.py','core/ppo.py'):h[name]=hashlib.sha256((ROOT/'patches'/name).read_bytes()).hexdigest()

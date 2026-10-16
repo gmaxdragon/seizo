@@ -1,0 +1,201 @@
+name: Seizo v12 learning feedback validation
+on:
+  push:
+    branches: [seizo-learning-feedback-v12]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: seizo-feedback-v12
+  cancel-in-progress: false
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '1'
+      PYTHONUTF8: '1'
+      SEIZO_RELEASE_REPO: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Apply bounded feedback integration and assemble original app
+        shell: python
+        run: |
+          import hashlib,json,pathlib,shutil,subprocess,tarfile
+          subprocess.run(['python','tools/apply_feedback_v12.py'],check=True)
+          root=pathlib.Path('.')
+          shutil.copyfile('tools/legacy_updater_reference.py','release-legacy-updater.py')
+          manifest=json.loads((root/'desktop_manifest.json').read_text())
+          archive=root/'Seizo_Learn_Web.tar.xz'
+          assert hashlib.sha256(archive.read_bytes()).hexdigest()==manifest['base']['sha256']
+          dest=root/'feedback-runtime';dest.mkdir()
+          with tarfile.open(archive,'r:xz') as tf:tf.extractall(dest,filter='data')
+          app=dest/'Seizo_Learn';shutil.copytree(root/'patches',app,dirs_exist_ok=True)
+          (root/'runtime-path.txt').write_text(str(app))
+      - name: Linux pinned physics and CPU graphics
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libosmesa6 libgl1-mesa-dri libegl1 libegl-mesa0
+          python -m pip install 'numpy<3' 'mujoco==3.3.7' pillow playwright
+          python -m playwright install --with-deps chromium
+      - name: Windows numerical dependency
+        if: runner.os == 'Windows'
+        run: python -m pip install 'numpy<3'
+      - name: Linux full regression and actual browser evidence
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          MUJOCO_GL: osmesa
+          PYOPENGL_PLATFORM: osmesa
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: |
+          set -euo pipefail
+          cd "$(cat runtime-path.txt)"
+          python -m unittest discover -s tests -p 'test_*.py' -v 2>&1 | tee feedback-full-tests.txt
+          node --input-type=module --check < web/app.js
+          node --input-type=module --check < web/proposal_ui.js
+          python tests/browser_proposal_bridge.py 2>&1 | tee feedback-bridge-browser.txt
+          python tests/browser_feedback_v12.py 2>&1 | tee feedback-browser.txt
+      - name: Windows feedback protocol updater and credential checks
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Set-Location (Get-Content runtime-path.txt)
+          python -m unittest discover -s tests -p 'test_proposal*.py' -v 2>&1 | Tee-Object feedback-proposal-tests.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m unittest discover -s tests -p 'test_feedback_v12.py' -v 2>&1 | Tee-Object feedback-learning-tests.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m unittest discover -s tests -p 'test_key_storage.py' -v 2>&1 | Tee-Object feedback-key-tests.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: feedback-evidence-${{ runner.os }}
+          path: |
+            feedback-source-hashes.json
+            feedback-runtime/Seizo_Learn/feedback-*.txt
+            feedback-runtime/Seizo_Learn/evidence/
+            feedback-runtime/Seizo_Learn/feedback-evidence/
+          retention-days: 7
+  experiment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '1'
+      MUJOCO_GL: osmesa
+      PYOPENGL_PLATFORM: osmesa
+      LIBGL_ALWAYS_SOFTWARE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Assemble exact camera-simulator experiment
+        shell: python
+        run: |
+          import hashlib,json,pathlib,shutil,subprocess,tarfile
+          subprocess.run(['python','tools/apply_feedback_v12.py'],check=True)
+          root=pathlib.Path('.');m=json.loads((root/'desktop_manifest.json').read_text())
+          arc=root/'Seizo_Learn_Web.tar.xz'
+          assert hashlib.sha256(arc.read_bytes()).hexdigest()==m['base']['sha256']
+          with tarfile.open(arc,'r:xz') as tf:tf.extractall('experiment-runtime',filter='data')
+          shutil.copytree('patches','experiment-runtime/Seizo_Learn',dirs_exist_ok=True)
+      - name: Install pinned simulator dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libosmesa6 libgl1-mesa-dri
+          python -m pip install 'numpy<3' 'mujoco==3.3.7' pillow
+      - name: Measure actual camera learning, retaining failures
+        shell: bash
+        run: |
+          set -o pipefail
+          cd experiment-runtime/Seizo_Learn
+          python tests/experiment_feedback_v12.py 2>&1 | tee feedback-experiment-log.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: feedback-real-experiment
+          path: |
+            feedback-source-hashes.json
+            experiment-runtime/Seizo_Learn/feedback-experiment.json
+            experiment-runtime/Seizo_Learn/feedback-experiment-log.txt
+          retention-days: 7
+  package:
+    needs: [test, experiment]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: feedback-*
+          path: verified-feedback
+      - name: Reproduce verified source and pin candidate only
+        shell: python
+        run: |
+          import hashlib,json,os,pathlib,subprocess
+          subprocess.run(['python','tools/apply_feedback_v12.py'],check=True)
+          root=pathlib.Path('.');branch='seizo-learning-feedback-v12'
+          assert os.environ['GITHUB_REF']=='refs/heads/'+branch
+          expected=os.environ['GITHUB_SHA']
+          def git(*args):return subprocess.check_output(['git',*args],text=True).strip()
+          hashes=json.loads((root/'feedback-source-hashes.json').read_text())
+          for name in ('feedback-evidence-Linux','feedback-evidence-Windows','feedback-real-experiment'):
+              found=json.loads((root/'verified-feedback'/name/'feedback-source-hashes.json').read_text())
+              assert hashes==found,'Different tested source: '+name
+          assert git('ls-remote','origin','refs/heads/'+branch).split()[0]==expected
+          subprocess.run(['git','config','user.name','github-actions[bot]'],check=True)
+          subprocess.run(['git','config','user.email','41898282+github-actions[bot]@users.noreply.github.com'],check=True)
+          subprocess.run(['git','add','patches'],check=True)
+          subprocess.run(['git','commit','-m','Package tested v12 learning feedback; physical arm remains locked'],check=True)
+          source=git('rev-parse','HEAD')
+          m=json.loads((root/'release-candidate-manifest.json').read_text())
+          for name,value in m['patches'].items():
+              value['url']='https://raw.githubusercontent.com/gmaxdragon/seizo/'+source+'/patches/'+name
+              assert value['sha256']==hashlib.sha256((root/'patches'/name).read_bytes()).hexdigest()
+          import importlib.util
+          spec=importlib.util.spec_from_file_location('original','tools/legacy_updater_reference.py')
+          u=importlib.util.module_from_spec(spec);spec.loader.exec_module(u);u.validated_manifest(m)
+          (root/'desktop_manifest.json').write_text(json.dumps(m,separators=(',',':'))+'\n')
+          proof={'version':m['version'],'source_commit':source,'tested_commit':expected,
+                 'patch_tree':git('rev-parse','HEAD:patches'),'source_hashes':hashes,
+                 'manifest_sha256':hashlib.sha256((root/'desktop_manifest.json').read_bytes()).hexdigest(),
+                 'physical_motion':False,'user_checkpoint_inspected':False,
+                 'note':'No skill success is required to pass a diagnostic software release. Actual experiment results, including failures, are retained.'}
+          (root/'release-proof-v12.json').write_text(json.dumps(proof,indent=2)+'\n')
+          subprocess.run(['git','add','desktop_manifest.json','release-proof-v12.json'],check=True)
+          subprocess.run(['git','commit','-m','Pin verified v12 no-motion desktop updater manifest'],check=True)
+          subprocess.run(['git','push','origin','HEAD:refs/heads/'+branch],check=True)
+          print('Candidate:',git('rev-parse','HEAD'))
+      - uses: actions/upload-artifact@v4
+        with:
+          name: feedback-v12-verified-candidate
+          path: |
+            patches/
+            desktop_manifest.json
+            release-proof-v12.json
+            verified-feedback/
+          retention-days: 7

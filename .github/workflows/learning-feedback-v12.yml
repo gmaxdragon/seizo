@@ -33,7 +33,7 @@ jobs:
         shell: python
         run: |
           import hashlib,json,pathlib,shutil,subprocess,tarfile
-          subprocess.run(['python','tools/apply_feedback_v12.py'],check=True)
+          subprocess.run(['python','tools/prepare_feedback_v12.py'],check=True)
           root=pathlib.Path('.')
           shutil.copyfile('tools/legacy_updater_reference.py','release-legacy-updater.py')
           manifest=json.loads((root/'desktop_manifest.json').read_text())
@@ -75,7 +75,7 @@ jobs:
           Set-Location (Get-Content runtime-path.txt)
           python -m unittest discover -s tests -p 'test_proposal*.py' -v 2>&1 | Tee-Object feedback-proposal-tests.txt
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m unittest discover -s tests -p 'test_feedback_v12.py' -v 2>&1 | Tee-Object feedback-learning-tests.txt
+          python -m unittest discover -s tests -p 'test_feedback*.py' -v 2>&1 | Tee-Object feedback-learning-tests.txt
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m unittest discover -s tests -p 'test_key_storage.py' -v 2>&1 | Tee-Object feedback-key-tests.txt
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -110,7 +110,7 @@ jobs:
         shell: python
         run: |
           import hashlib,json,pathlib,shutil,subprocess,tarfile
-          subprocess.run(['python','tools/apply_feedback_v12.py'],check=True)
+          subprocess.run(['python','tools/prepare_feedback_v12.py'],check=True)
           root=pathlib.Path('.');m=json.loads((root/'desktop_manifest.json').read_text())
           arc=root/'Seizo_Learn_Web.tar.xz'
           assert hashlib.sha256(arc.read_bytes()).hexdigest()==m['base']['sha256']
@@ -157,7 +157,7 @@ jobs:
         shell: python
         run: |
           import hashlib,json,os,pathlib,subprocess
-          subprocess.run(['python','tools/apply_feedback_v12.py'],check=True)
+          subprocess.run(['python','tools/prepare_feedback_v12.py'],check=True)
           root=pathlib.Path('.');branch='seizo-learning-feedback-v12'
           assert os.environ['GITHUB_REF']=='refs/heads/'+branch
           expected=os.environ['GITHUB_SHA']

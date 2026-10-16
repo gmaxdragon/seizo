@@ -151,6 +151,7 @@ def rollout(agent,world,length=96,on_episode=None,on_frame=None,stop=None):
             agent.episodes+=1
             result={k:bool(info[k][i]) for k in ('success','fault','fallen')}
             result['safety_abort']=bool(info.get('invalid_physics',np.zeros(world.n,bool))[i])
+            result['failure_reason']=str(info.get('failure_reason',['unclassified']*world.n)[i])
             result.update({'task':int(info['task'][i]),'steps':int(info['steps'][i]),
                            'return':float(info['return'][i]),'episode':agent.episodes})
             completed.append(result)

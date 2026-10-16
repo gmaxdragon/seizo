@@ -1,17 +1,23 @@
-Seizo v11: AI proposals, physical arm locked
+Seizo v12: mistake feedback and measured learning
 
-Keep using your existing START_SEIZO.bat.
-END RUN & SAVE, wait for Saved, close the old terminal, then reopen
-START_SEIZO.bat with internet. Verify seizo-proposal-bridge-v11.
-No new launcher, manual command copying or new ZIP is required.
+END RUN & SAVE. Wait for Saved, close the terminal, and reopen your
+existing START_SEIZO.bat with internet. Confirm seizo-learning-feedback-v12.
+No new launcher or training reset. Your camera_views_v9 policy is preserved.
 
-Open AI instruction to mock Pi (no motion). Enter one supported task.
-The original saved camera PPO proposes one bounded simulator decision.
-Missing or incompatible checkpoints and unproven skills are shown as blockers.
-No checkpoint upload is required just to install this no-motion release.
-Do not reset or delete your training data.
+Train / resume uses bounded penalties for blocked actions, dropped objects,
+empty grasps, limit requests and expired attempts. Moving away from the task
+cannot earn a novelty bonus. No corrective motor script replaces the policy.
 
-REAL ARM LOCKED. A mock receipt is not permission to move the real arm.
-No physical connection, no execution route, no motor commands.
-Hardware commissioning and local authorization are separate future work.
-STOP here cancels desktop proposals, not the physical robot.
+Is Seizo learning? shows the last failure, the feedback score, and measured
+actor/critic parameter changes after a real optimizer batch. Updates alone
+are not proof of skill. Completed runs of at least 10 episodes automatically
+run a 5-trial comparison on the current lesson, plus a random baseline and
+fault trials. Small tests are explicitly not proof. Test all tasks with
+20 trials for fuller comparisons against the pre-training reference.
+Before each training run a reference copy is saved. The first v12 training
+run also preserves the previous checkpoint in pre_feedback_v12.npz.
+
+Watch policy and Test all tasks are frozen tests; they do not learn.
+The Hack Club chat model interprets tasks; local PPO learns the controls.
+This release does not certify learned task success or fix unmeasured geometry.
+REAL ARM LOCKED. No physical Pi, serial, GPIO or motor connection.

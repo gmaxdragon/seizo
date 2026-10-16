@@ -10,6 +10,7 @@ from .detailed_scene import add_details,update_details
 from .view_observation import WIDTH,HEIGHT,NAMES,OBS_SIZE,POLICY_ID,CONTRACT,encode,png
 from .view_curriculum import ViewSchedule,MotionDiscovery
 from . import world as base
+from .learning_feedback import assess, VERSION as FEEDBACK_VERSION
 
 @functools.lru_cache(maxsize=2)
 def _xml(mount):
@@ -41,6 +42,7 @@ class ViewWorld(CameraWorld):
         self._view_masks=np.ones((int(n),4),bool)
         self.discoveries=[MotionDiscovery() for _ in range(int(n))]
         self.last_discovery=np.zeros(int(n));self.last_task_reward=np.zeros(int(n))
+        self.last_feedback=[None]*int(n)
         super().__init__(n,seed,task,fault_probability,camera_config)
         self._camids=[self.model.camera(name).id for name in NAMES]
         self._current=np.zeros((self.n,4,HEIGHT,WIDTH,3),np.uint8);self._previous=self._current.copy()
@@ -80,7 +82,7 @@ class ViewWorld(CameraWorld):
             ix=range(self.n) if ids is None else ids
             for i in ix:
                 self.discoveries[i].reset(self.tcp[i],self.q[i],self.learning_episode)
-                self.last_discovery[i]=0.;self.last_task_reward[i]=0.
+                self.last_discovery[i]=0.;self.last_task_reward[i]=0.;self.last_feedback[i]=None
             self._resets+=1
 
     def prepare_learning(self,episode,stage):
@@ -131,19 +133,48 @@ class ViewWorld(CameraWorld):
     def step(self,actions):
         self.observation();a=np.asarray(actions,float)
         if a.shape!=(self.n,5) or not np.isfinite(a).all():raise ValueError('Five finite requested controls required')
+        active=~self.episode_done
         for i in np.where(np.all(~self._available[:,:2],axis=1))[0]:
             self.episode_done[i]=True;self.physics_failures[i]=True;self.guard_reason[i]='both mounted cameras unavailable'
-        oldq=self.q.copy();self._cached=[None]*self.n;self._previous_action=a.copy()
+        oldq=self.q.copy();oldtarget=self.targetq.copy()
+        previous_phi=self.metrics()[0].copy()
+        previous_held=self.pinched[np.arange(self.n),self.target_obj].copy()
+        previous_lift=self.floor_clearance().copy()
+        self._cached=[None]*self.n;self._previous_action=a.copy()
         obs,reward,terminated,truncated,info=MuJoCoWorld.step(self,a)
-        self.last_task_reward=reward.copy();self.last_discovery[:]=0
+        progress=self.metrics()[0]-previous_phi
+        adjusted=reward.copy()
+        for i in range(self.n):
+            requested=oldtarget[i]+np.clip(a[i],-1,1)*base.DELTA
+            # Axial wrist roll is periodic. Do not apply a false physical range.
+            indices=[0,1,2,4]
+            limit=bool(np.any(requested[indices]<base.LOW[indices]-1e-6) or
+                       np.any(requested[indices]>base.HIGH[indices]+1e-6))
+            item=assess(reward=float(reward[i]),progress=float(progress[i]),
+                guard=self.guard_reason[i],fault=bool(info['fault'][i] or
+                    (info['invalid_physics'][i] and not self.guard_reason[i])),
+                fallen=bool(info['fallen'][i]),success=bool(info['success'][i]),
+                truncated=bool(truncated[i]),was_held=bool(previous_held[i]),
+                held=bool(info['grip'][i]),previous_lift=float(previous_lift[i]),
+                closing_empty=bool(self.task[i]>=3 and oldq[i,4]>.15 and self.q[i,4]<=.15),
+                limit=limit,active=bool(active[i]))
+            self.last_feedback[i]=item;adjusted[i]=item['total_reward']
+        self.returns+=adjusted-reward
+        reward=adjusted;self.last_task_reward=reward.copy();self.last_discovery[:]=0
         if self.learning_enabled:
             for i in range(self.n):
                 if np.linalg.norm(a[i])>.05:
                     self.last_discovery[i]=self.discoveries[i].reward(self.tcp[i],self.q[i],oldq[i],
-                        invalid=bool(self.physics_failures[i] or info['fault'][i] or info['fallen'][i]))
+                        invalid=not self.last_feedback[i]['discovery_allowed'])
             reward=reward+self.last_discovery.astype(np.float32);self.returns+=self.last_discovery
+        for i,item in enumerate(self.last_feedback):
+            item['discovery_bonus']=float(self.last_discovery[i])
+            item['total_reward']=float(reward[i])
         info['discovery_bonus']=self.last_discovery.copy();info['task_reward']=self.last_task_reward.copy()
         info['return']=self.returns.copy()
+        info['failure_reason']=np.array([x['reason'] for x in self.last_feedback])
+        info['feedback_penalty']=np.array([x['penalty'] for x in self.last_feedback])
+        info['feedback_version']=np.array([FEEDBACK_VERSION]*self.n)
         return obs,reward,terminated,truncated,info
 
     def frame(self,i=0):
@@ -160,5 +191,5 @@ class ViewWorld(CameraWorld):
             table_clearance_mm=round(self.table_clearance(i)*1000,3),safety_abort=self.guard_reason[i],
             camera_mount_is_measured=False,discovery_bonus=float(self.last_discovery[i]),
             task_reward=float(self.last_task_reward[i]),discovery_cells=self.discoveries[i].new_cells,
-            discovery_reward_is_skill=False)
+            discovery_reward_is_skill=False,learning_feedback=copy.deepcopy(self.last_feedback[i]))
         return f

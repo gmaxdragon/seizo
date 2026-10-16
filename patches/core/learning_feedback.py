@@ -46,9 +46,9 @@ on its own sampled transition and updates the policy in the next optimizer batch
         # Do not attribute injected or sensor faults to a learned motor choice.
         reward=min(float(reward),0.)
     elif guard:
-        events=['unsafe_action'];penalty=-1.
+        events=['unsafe_action'];penalty=-8.
     elif fallen:
-        events=['object_out_of_workspace'];penalty=-1.
+        events=['object_out_of_workspace'];penalty=-8.
     elif success:
         events=['success']
     else:
@@ -66,7 +66,7 @@ on its own sampled transition and updates the policy in the next optimizer batch
     allowed=(events[0] in ('progress','no_progress') and not truncated)
     total=float(reward)+penalty
     if any(e not in ('success','progress','no_progress','sensor_or_physics_fault') for e in events):
-        total=min(total,-1. if events[0] in ('unsafe_action','object_out_of_workspace') else -.015)
+        total=min(total,-8. if events[0] in ('unsafe_action','object_out_of_workspace') else -.015)
     reason=events[0]
     return {'version': VERSION, 'events': events, 'reason': reason,
             'penalty': float(total-float(reward)), 'base_reward': float(reward),
@@ -135,5 +135,6 @@ def compare_scores(current, reference, random_baseline, reference_kind):
             'paired_exact_p_two_sided':p,'success_change':(wins-losses)/n,
             'mean_error_before_mm':reference['mean_error_mm'],'mean_error_after_mm':current['mean_error_mm'],
             'physics_aborts_before':reference['invalid_physics'],'physics_aborts_after':current['invalid_physics'],
+            'safety_observation':('more_guard_aborts_observed' if current['invalid_physics']>reference['invalid_physics'] else 'fewer_guard_aborts_observed' if current['invalid_physics']<reference['invalid_physics'] else 'same_guard_abort_count'),
             'mastery_claim':False,'physical_validation':False,
             'qualification':'One task/test batch, unadjusted per-task test. Not independent replication or hardware validation.'}

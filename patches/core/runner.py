@@ -28,6 +28,7 @@ except ImportError:
     MODEL_ID=_approx_world.MODEL_ID
     _BACKEND_LABEL='Fast approximate contact solver (MuJoCo unavailable or fast mode requested)'
 from .ppo import Agent,rollout
+from .learning_feedback import FeedbackLedger,update_evidence,compare_scores,VERSION as FEEDBACK_VERSION
 
 
 def atomic_json(path,obj):
@@ -63,7 +64,15 @@ def evaluate(agent,task,n=20,seed=810017,random_policy=False,stop=None,fault_pro
     k=sum(int(r['success']) for r in records);faults=sum(int(r['fault']) for r in records)
     rate=k/n;z=1.96;den=1+z*z/n
     mid=(rate+z*z/(2*n))/den;half=z*((rate*(1-rate)/n+z*z/(4*n*n))**.5)/den
-    return {'task':task,'trials':n,'successes':k,'failures':n-k-faults,'success_rate':rate,
+    reasons={}
+    for r in records:
+        name=str(r.get('failure_reason','success' if r['success'] else 'unclassified'))
+        reasons[name]=reasons.get(name,0)+1
+    return {'outcomes':[{'success':bool(r['success']),'fault':bool(r['fault']),
+            'invalid_physics':bool(r.get('invalid_physics',False)),
+            'reason':str(r.get('failure_reason','unclassified'))} for r in records],
+        'failure_counts':reasons,'feedback_version':FEEDBACK_VERSION,
+        'task':task,'trials':n,'successes':k,'failures':n-k-faults,'success_rate':rate,
         'success_interval_95':[max(0.,mid-half),min(1.,mid+half)],
         'mean_return':float(np.mean([r['return'] for r in records])),
         'mean_moves':float(np.mean([r['steps'] for r in records])),
@@ -94,6 +103,7 @@ class Runner:
         self.last_saved=None;self.saved_fingerprint=None;self.save_verified=False;self.latest_stats={};self.validation_serial=0;self.promotions=0
         self.evaluation_progress=None;self.last_run=None
         self.trace_seq=0;self.watch_trace=[];self.generation=0;self.best_scores={};self.initial_hash=self.agent.signature()
+        self.feedback=FeedbackLedger()
         path=self.folder/'policy.npz'
         if path.exists():
             try:
@@ -102,6 +112,7 @@ class Runner:
                 self.target=int(extra.get('target',self.agent.episodes+1000));self.counts=extra.get('counts',self.counts)
                 self.history=extra.get('history',[]) [-200:];self.validation=extra.get('validation');self.initial_hash=extra.get('initial_hash',self.initial_hash)
                 self.best_scores=extra.get('best_scores',{});self.initial=self.Agent(self.agent.seed)
+                self.feedback=FeedbackLedger(extra.get('learning_feedback'))
                 self.status='paused';self.last_saved=path.stat().st_mtime;self.saved_fingerprint=self.agent.signature();self.save_verified=True
             except ValueError as e:
                 # The previous model had missing rigid-contact geometry; old
@@ -151,13 +162,13 @@ class Runner:
                 'weights_changed_from_initial':self.agent.signature()!=self.initial_hash,
                 'last_run':copy.deepcopy(self.last_run),
                 'initial_fingerprint':self.initial_hash,'policy_fingerprint':self.agent.signature(),'best_scores':dict(self.best_scores),
-                'physics':_BACKEND_LABEL,
+                'learning_feedback':self.feedback.snapshot(),'physics':_BACKEND_LABEL,
                 'physical_motion':False,'cloud_training_calls':0,'model_id':self.model_id}
 
     def save(self):
         with self.lock:
             self.agent.save(self.folder/'policy.npz',{'stage':self.stage,'config':self.config,'target':self.target,
-                'counts':self.counts,'history':self.history[-200:],'validation':self.validation,'initial_hash':self.initial_hash,'best_scores':self.best_scores,'camera_config':self.camera_config})
+                'counts':self.counts,'history':self.history[-200:],'validation':self.validation,'initial_hash':self.initial_hash,'best_scores':self.best_scores,'camera_config':self.camera_config,'learning_feedback':self.feedback.snapshot()})
             loaded,_=self.Agent.load(self.folder/'policy.npz')
             same=loaded.signature()==self.agent.signature()
             same=same and all(np.array_equal(loaded.m[k],self.agent.m[k]) and np.array_equal(loaded.v[k],self.agent.v[k]) for k in self.agent.p)
@@ -177,9 +188,23 @@ class Runner:
         if cfg['compute'] not in ('cad','fast'):raise ValueError('Unknown computer-load mode')
         if not 0<=float(cfg['fault_probability'])<=.25:raise ValueError('Fault rate must be 0 to 25%.')
         with self.lock:
+            if self.thread and self.thread.is_alive():raise ValueError('Previous operation is still finishing.')
             if self.status in ('training','stopping','evaluating','watching'):raise ValueError('Stop the current operation first.')
             if self.status=='error':raise ValueError(self.error+' Use a new empty data folder, do not overwrite your saved data.')
             resume=self.status=='paused' and all(cfg[k]==self.config[k] for k in ('episodes','task')) and self.target>self.agent.episodes
+            # Preserve the user's exact starting point for a before/after test.
+            # This is a reference copy, never an automatic replacement policy.
+            if self.is_camera:
+                backup=self.folder/'pre_feedback_v12.npz'
+                if not backup.exists():
+                    source=self.folder/'policy.npz'
+                    if source.exists():
+                        import shutil
+                        shutil.copy2(source,backup)
+                    else:self.agent.save(backup,{'camera_config':self.camera_config})
+                self.agent.save(self.folder/'before_training_v12.npz',
+                    {'camera_config':self.camera_config,'feedback_version':FEEDBACK_VERSION,
+                     'reference_kind':'before_latest_training_run'})
             if cfg['task']!=self.config['task']:
                 self.agent.p['logstd'][:]=np.maximum(self.agent.p['logstd'],-.35)
             self.config=cfg;self.last_trace=None;self.last_evaluation=None
@@ -193,13 +218,14 @@ class Runner:
         env=None
         try:
             env=self.World(n=getattr(self.World,'training_envs',(2 if MODEL_ID==MODEL_VERSION else 8)),seed=int(self.agent.rng.integers(1,2**30)),task=self.config['task'],fault_probability=self.config['fault_probability'],**self.world_options())
-            env.stage=self.stage;env.reset();trace=[env.frame()];last_save=time.monotonic();next_eval=self.agent.steps+16000
+            env.stage=self.stage;env.reset();trace=[env.frame()];last_save=time.monotonic();validation_interval=2048 if self.is_camera else 16000;next_eval=self.agent.steps+validation_interval
             with self.lock:self.preview_frame=trace[0];self.preview_serial+=1
             start_hash=self.agent.signature();start_updates=self.agent.updates
             if not (self.folder/'initial_policy.npz').exists():self.initial.save(self.folder/'initial_policy.npz')
             def complete(item):
                 with self.lock:
                     c=self.counts[item['task']];c['attempts']+=1;c['successes']+=int(item['success']);self.recent.append(int(item['success']));c['safety_aborts']=c.get('safety_aborts',0)+int(item.get('safety_abort',False))
+                self.feedback.episode(item)
                 if hasattr(self,'record_training_episode'):self.record_training_episode(item)
             def frame(world,info):
                 nonlocal trace
@@ -207,6 +233,8 @@ class Runner:
                     trace=[world.frame()]
                     with self.lock:self.preview_frame=trace[0];self.preview_serial+=1
                     return
+                if getattr(world,'last_feedback',None):
+                    with self.lock:self.feedback.observe([x for x in world.last_feedback if x is not None])
                 trace.append(world.frame())
                 if len(trace)%8==0:
                     with self.lock:self.preview_frame=trace[-1];self.preview_serial+=1
@@ -227,18 +255,21 @@ class Runner:
                 if batch is not None and len(batch[0])>1:
                     # Finish this bounded PPO update before checkpointing, unless user stopped.
                     with self.lock:
+                        before={k:v.copy() for k,v in self.agent.p.items()}
+                        fingerprint=self.agent.signature();updates=self.agent.updates
                         stats=self.agent.update(batch,epochs=4,stop=self.stop_event.is_set)
+                        self.feedback.last_update=update_evidence(self.agent,before,fingerprint,updates,len(batch[0]),stats)
                         if stats:self.latest_stats=stats[-1]
                 if time.monotonic()-last_save>25:self.save();last_save=time.monotonic()
                 if self.agent.steps>=next_eval and not stopped():
                     clone=self.agent.clone();task=TASKS[self.stage] if self.config['task']=='curriculum' else (self.config['task'] if self.config['task'] in TASKS else 'reach')
-                    val=evaluate(clone,task,getattr(self,'validation_trials',5 if self.is_camera else 24),seed=812321+int(self.agent.steps//16000)*91,stop=self.stop_event.is_set,world_factory=self.World,world_options=self.evaluation_options(),on_timing=getattr(self,'record_trial_time',None))
+                    val=evaluate(clone,task,getattr(self,'validation_trials',5 if self.is_camera else 24),seed=secrets.randbelow(2**30),stop=self.stop_event.is_set,world_factory=self.World,world_options=self.evaluation_options(),on_timing=getattr(self,'record_trial_time',None))
                     if hasattr(self,'after_validation'):self.after_validation(val,env)
                     with self.lock:
                         self.validation=val
                         self.history.append({'episodes':self.agent.episodes,'moves':self.agent.steps,**val});self.history=self.history[-200:]
                         # Training curriculum changes only after a held-out validation result.
-                        if self.config['task']=='curriculum' and val['success_rate']>=.7:
+                        if self.config['task']=='curriculum' and val['success_rate']>=.7 and not val['invalid_physics'] and not val['faults']:
                             self.promotions+=1
                             if self.promotions>=2 and self.stage<len(TASKS)-1:
                                 self.stage+=1;self.promotions=0;env.stage=self.stage
@@ -248,7 +279,7 @@ class Runner:
                         else:self.promotions=0
                         if task not in self.best_scores or val['success_rate']>self.best_scores[task]:
                             self.best_scores[task]=val['success_rate'];self.agent.save(self.folder/('best_'+task+'.npz'),{'validation':val})
-                    self.save();next_eval=self.agent.steps+16000
+                    self.save();next_eval=self.agent.steps+validation_interval
                 if self.config['compute']=='cad':self.stop_event.wait(min(.5,(time.monotonic()-started)*.45))
             with self.lock:
                 self.last_run={'before_fingerprint':start_hash,'after_fingerprint':self.agent.signature(),
@@ -257,6 +288,9 @@ class Runner:
                                'weights_updated':start_hash!=self.agent.signature(),'cloud_requests':0}
             self.save()
             with self.lock:self.status='paused' if self.stop_event.is_set() else 'complete'
+            if self.is_camera and not self.stop_event.is_set() and self.agent.episodes-self.start_episodes>=10:
+                name=TASKS[self.stage] if self.config['task'] not in TASKS else self.config['task']
+                self.begin_evaluation(task=name,trials=5,_inline=True)
         except InterruptedError:
             if env is not None:
                 with self.lock:self.last_run={'before_fingerprint':start_hash,'after_fingerprint':self.agent.signature(),
@@ -293,7 +327,7 @@ class Runner:
                 p.replace(archive/p.name)
             self.agent=self.Agent();self.initial=self.Agent();self.initial_hash=self.agent.signature();self.stage=0
             self.counts=[{'attempts':0,'successes':0,'safety_aborts':0} for _ in TASKS];self.history=[];self.last_trace=None;self.validation=None;self.last_evaluation=None
-            self.recent.clear();self.best_scores={};self.promotions=0;self.latest_stats={};self.target=self.config['episodes'];self.status='ready';self.error='';self.save()
+            self.feedback=FeedbackLedger();self.recent.clear();self.best_scores={};self.promotions=0;self.latest_stats={};self.target=self.config['episodes'];self.status='ready';self.error='';self.save()
         return {'ok':True,'backup':archive.name,'episodes':0}
 
 
@@ -352,14 +386,27 @@ class Runner:
                 'evaluation_available':False,'message':'No current frozen evaluation. Run Test all tasks before requesting AI advice.',
                 'physical_validation':False,'cloud_model_finetuned':False}
 
-    def begin_evaluation(self,task='all',trials=20):
+    def begin_evaluation(self,task='all',trials=20,_inline=False):
         minimum=1 if self.is_camera else 5
         if task not in TASKS+('all',) or type(trials)is not int or not minimum<=trials<=100:
             raise ValueError(f'Choose {minimum} to 100 trials per task.')
         with self.lock:
+            if _inline and self.stop_event.is_set():return {'ok':False,'cancelled':True}
+            if not _inline and self.thread and self.thread.is_alive():raise ValueError('Previous operation is still finishing.')
             if self.status in ('training','stopping','evaluating','watching'):raise ValueError('Stop and save before evaluation.')
-            current=self.agent.clone();initial=self.initial.clone();self.status='evaluating';self.last_evaluation=None;before=current.signature()
-            self.stop_event.clear();self.error='';self.evaluation_progress={'phase':'Starting','completed':0,'total':len(TASKS) if task=='all' else 1}
+            current=self.agent.clone();initial=self.initial.clone();reference=initial.clone()
+            reference_kind='untrained_same_model'
+            path=self.folder/'before_training_v12.npz'
+            if self.is_camera and path.exists():
+                reference,extra=self.Agent.load(path)
+                if extra.get('camera_config')==self.camera_config:
+                    reference_kind='before_latest_training_run'
+                else:
+                    reference=initial.clone();reference_kind='untrained_camera_setup_changed'
+            reference_fingerprint=reference.signature()
+            self.status='evaluating';self.last_evaluation=None;before=current.signature()
+            if not _inline:self.stop_event.clear()
+            self.error='';self.evaluation_progress={'phase':'Starting','completed':0,'total':len(TASKS) if task=='all' else 1}
         def run():
             try:
                 seed=secrets.randbelow(2**30);rows=[];names=TASKS if task=='all' else (task,)
@@ -370,7 +417,13 @@ class Runner:
                                        random_policy=(label=='random'),stop=self.stop_event.is_set,world_factory=self.World,world_options=self.evaluation_options(),on_trial=self._eval_trial,on_timing=getattr(self,'record_trial_time',None))
                         if label=='policy':now=value
                         else:baseline=value
-                    rows.append({'current':now,'random_actions':baseline})
+                    with self.lock:self.evaluation_progress={'phase':name+' / before-training reference','completed':index,'total':len(names)}
+                    earlier=evaluate(reference,name,trials,seed+index*1000,stop=self.stop_event.is_set,
+                        world_factory=self.World,world_options=self.evaluation_options(),on_trial=self._eval_trial,
+                        on_timing=(lambda t,r,s,f:self.record_trial_time(t,r,s,f,label='reference'))
+                            if hasattr(self,'record_trial_time') else None)
+                    rows.append({'current':now,'random_actions':baseline,'reference':earlier,
+                                 'learning_comparison':compare_scores(now,earlier,baseline,reference_kind)})
                 # Fault exercise stays separate from clean task scores.
                 faults=evaluate(current,'reach',max(5,trials//2),seed+9000,stop=self.stop_event.is_set,fault_probability=1.,world_factory=self.World,world_options=self.evaluation_options(),on_timing=getattr(self,'record_trial_time',None))
                 def combine(key):
@@ -380,7 +433,10 @@ class Runner:
                 from .proposal_policy import runtime_contract
                 result={'proposal_contract_sha256':runtime_contract(self.camera_config) if self.is_camera else None,
                         'model_id':self.model_id,'observation_mode':'two_rgb_cameras' if self.is_camera else 'privileged_simulator_state','current':combine('current'),'random_actions':combine('random_actions'),'by_task':rows,'fault_test':faults,
-                        'fingerprint_unchanged':before==current.signature(),'policy_fingerprint':before,'episodes_at_test':current.episodes,
+                        'fingerprint_unchanged':before==current.signature() and reference_fingerprint==reference.signature(),
+                        'reference_fingerprint':reference_fingerprint,'reference_kind':reference_kind,
+                        'feedback_version':FEEDBACK_VERSION,
+                        'policy_fingerprint':before,'episodes_at_test':current.episodes,
                         'weights_updated':False,'physical_motion':False,'camera_config':dict(self.camera_config),
                         'note':'Fresh paired physics scenarios; faults scored separately. Finite sample, not hardware certification.'}
                 memory={'schema':'seizo-experience/v1','model_id':self.model_id,'policy_fingerprint':before,'evaluation_available':True,
@@ -407,7 +463,10 @@ class Runner:
             except Exception as e:
                 with self.lock:self.status='error';self.error=str(e)
                 (self.folder/'last_error.txt').write_text(traceback.format_exc())
-        self.thread=threading.Thread(target=run,daemon=True);self.thread.start();return {'ok':True,'cloud_requests':0}
+        if _inline:run()
+        else:
+            self.thread=threading.Thread(target=run,daemon=True);self.thread.start()
+        return {'ok':True,'cloud_requests':0}
 
     def evaluation_options(self):
         return self.world_options()
@@ -449,7 +508,7 @@ class Runner:
     def skill_evidence(self):
         result=[]
         evidence=self.last_evaluation
-        match=bool(evidence and evidence.get('policy_fingerprint')==self.agent.signature()
+        match=bool(evidence and evidence.get('feedback_version')==FEEDBACK_VERSION and evidence.get('policy_fingerprint')==self.agent.signature()
                    and (not self.is_camera or evidence.get('camera_config',{})==self.camera_config))
         rows={r['current']['task']:r['current'] for r in (evidence or {}).get('by_task',[])}
         for task in TASKS:

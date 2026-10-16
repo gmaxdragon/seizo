@@ -108,45 +108,8 @@ jobs:
           path: verified-evidence
       - name: Reproduce both tested source identities
         run: python tools/prepare_proposal_release_v11.py
-      - name: Verify cross-platform hashes then commit pinned candidate on release branch only
-        shell: python
-        run: |
-          import hashlib,json,os,pathlib,subprocess,sys
-          root=pathlib.Path('.')
-          branch='seizo-proposal-release-v11'
-          assert os.environ['GITHUB_REF']=='refs/heads/'+branch
-          expected_sha=os.environ['GITHUB_SHA']
-          def git(*args):return subprocess.check_output(['git',*args],text=True).strip()
-          local=json.loads((root/'release-source-hashes.json').read_text())
-          for platform in ('Linux','Windows'):
-              found=json.loads((root/'verified-evidence'/('v11-evidence-'+platform)/'release-source-hashes.json').read_text())
-              assert local==found, 'Source differs from tested '+platform+' artifact'
-          remote=git('ls-remote','origin','refs/heads/'+branch).split()[0]
-          assert remote==expected_sha, 'Release branch changed during tests'
-          subprocess.run(['git','config','user.name','github-actions[bot]'],check=True)
-          subprocess.run(['git','config','user.email','41898282+github-actions[bot]@users.noreply.github.com'],check=True)
-          subprocess.run(['git','add','--','patches','seizo_updater.py','docs/PROPOSAL_BRIDGE_V11_RELEASE.md'],check=True)
-          subprocess.run(['git','commit','-m','Package tested Seizo v11 source; physical arm remains locked'],check=True)
-          source=git('rev-parse','HEAD')
-          sys.path.insert(0,str(root/'tools'))
-          from prepare_proposal_release_v11 import make_manifest
-          manifest=make_manifest(source)
-          (root/'desktop_manifest.json').write_text(json.dumps(manifest,separators=(',',':'))+'\n',encoding='utf-8')
-          import seizo_updater
-          seizo_updater.validated_manifest(manifest)
-          for name,entry in manifest['patches'].items():
-              assert hashlib.sha256((root/'patches'/name).read_bytes()).hexdigest()==entry['sha256']
-          proof={'version':manifest['version'],'source_commit':source,'tested_workflow_commit':expected_sha,
-                 'patch_tree':git('rev-parse','HEAD:patches'),'patch_count':len(manifest['patches']),
-                 'manifest_sha256':hashlib.sha256((root/'desktop_manifest.json').read_bytes()).hexdigest(),
-                 'source_hashes':local,'real_pi_connected':False,'automatic_motion_enabled':False,
-                 'authorized':False,'executed':False,'physically_verified':False,
-                 'note':'Linux and Windows tests passed; browser uses mocked intent and synthetic passing-score fixtures. Stable promotion is separate.'}
-          (root/'release-proof.json').write_text(json.dumps(proof,indent=2)+'\n')
-          subprocess.run(['git','add','desktop_manifest.json','release-proof.json'],check=True)
-          subprocess.run(['git','commit','-m','Pin verified v11 updater manifest without changing physical runtime'],check=True)
-          subprocess.run(['git','push','origin','HEAD:refs/heads/'+branch],check=True)
-          print(json.dumps({'candidate_commit':git('rev-parse','HEAD'),**proof}))
+      - name: Verify hashes and pin candidate on release branch only
+        run: python tools/publish_proposal_v11.py
       - uses: actions/upload-artifact@v4
         if: success()
         with:
@@ -155,6 +118,7 @@ jobs:
             desktop_manifest.json
             release-proof.json
             seizo_updater.py
+            release-legacy-updater.py
             patches/
             docs/PROPOSAL_BRIDGE_V11_RELEASE.md
             verified-evidence/

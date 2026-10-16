@@ -1,6 +1,7 @@
-# Preserve exact application/manifest hashes on Windows as well as Linux.
+# Preserve exact application and manifest hashes across operating systems.
 *.py text eol=lf
 *.js text eol=lf
+*.mjs text eol=lf
 *.json text eol=lf
 *.html text eol=lf
 *.css text eol=lf

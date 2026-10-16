@@ -1,0 +1,15 @@
+# Preserve exact application/manifest hashes on Windows as well as Linux.
+*.py text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.patch text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.gz binary
+*.xz binary
+*.png binary
+*.jpg binary
+*.npz binary

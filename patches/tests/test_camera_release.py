@@ -53,6 +53,6 @@ class CameraProduction(unittest.TestCase):
         self.assertEqual(CONTRACT['camera_names'],['overhead','wrist','side','front'])
         self.assertIn('masked',CONTRACT['test_condition'])
         self.assertTrue(CONTRACT['simulation_only'])
-        self.assertEqual(BUILD,'seizo-run-controls-v10')
+        self.assertEqual(BUILD,'seizo-proposal-bridge-dev-v1')
 
 if __name__=='__main__':unittest.main()

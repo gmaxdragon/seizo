@@ -13,7 +13,7 @@ from core.runner import Runner,World
 from core.cloud import HackClubPlanner
 
 ROOT=Path(__file__).resolve().parent
-BUILD='seizo-run-controls-v10';PORT=8772
+BUILD='seizo-proposal-bridge-dev-v1';PORT=8772
 
 class DataLock:
     def __init__(self,path):
@@ -38,6 +38,8 @@ class Server(http.server.ThreadingHTTPServer):
 
 
 def make_handler(runner,token,quit_event,cloud,instance_id='test-instance'):
+    from core.proposal_bridge import ProposalBridge
+    bridge=ProposalBridge(runner,cloud)
     key_commands=threading.Lock();key_state={'seq':-1}
     command_lock=threading.Lock();command_state={'seq':-1}
     def strict_json(raw):
@@ -69,7 +71,8 @@ def make_handler(runner,token,quit_event,cloud,instance_id='test-instance'):
                 return self.send(200,html.encode(),'text/html; charset=utf-8')
             if path.startswith('/api/'):
                 if not self.auth():return self.send(403,{'error':'Reopen the home page to restore this session.'})
-                if path=='/api/status':return self.send(200,{**runner.snapshot(),'build':BUILD,'cloud':cloud.status()})
+                if path=='/api/status':return self.send(200,{**runner.snapshot(),'build':BUILD,'cloud':cloud.status(),'proposal_bridge':bridge.snapshot()})
+                if path=='/api/proposal/status':return self.send(200,bridge.snapshot())
                 if path=='/api/experience':return self.send(200,runner.experience_summary())
                 if path=='/api/initial':
                     if runner.is_camera:
@@ -93,24 +96,35 @@ def make_handler(runner,token,quit_event,cloud,instance_id='test-instance'):
                 n=int(self.headers.get('Content-Length','0'))
                 if not 0<n<=16000:raise ValueError('Invalid request size.')
                 self.connection.settimeout(5.)
-                data=strict_json(self.rfile.read(n))
+                from core.proposal_protocol import strict_json as strict_proposal_json
+                data=strict_proposal_json(self.rfile.read(n))
                 if not isinstance(data,dict):raise ValueError('Expected a JSON object.')
                 path=urllib.parse.urlsplit(self.path).path
                 if path in ('/api/start','/api/trial','/api/evaluate','/api/gripper-check') and World.__module__!='core.mujoco_world':
                     raise ValueError('MuJoCo is unavailable. Close Seizo and reopen START_SEIZO.bat to repair dependencies. Training is blocked instead of using the old contact model.')
                 def keys(allowed):
                     if set(data)-set(allowed):raise ValueError('Unknown setting.')
-                if path in ('/api/start','/api/stop','/api/end-run'):
+                if bridge.active() and path in ('/api/start','/api/trial','/api/evaluate',
+                    '/api/gripper-check','/api/reset','/api/views/config','/api/cameras/config','/api/cameras/preview'):
+                    raise ValueError('Stop the proposal before changing policy or simulation state.')
+                if path in ('/api/start','/api/stop','/api/end-run','/api/proposal/prepare','/api/proposal/stop'):
                     seq=data.pop('control_seq',None)
                     if type(seq)is not int or not 0<=seq<2**53:raise ValueError('Invalid command sequence. Refresh the page.')
                     with command_lock:
                         if seq<=command_state['seq']:raise ValueError('A newer command or STOP replaced this request.')
                         command_state['seq']=seq
-                        if path=='/api/start':result=runner.start(data)
+                        if path in ('/api/stop','/api/end-run','/api/proposal/stop'):bridge.stop()
+                        if path=='/api/proposal/prepare':
+                            keys(('instruction','model'));result=bridge.begin(data.get('instruction'),data.get('model','qwen/qwen3-32b'))
+                        elif path=='/api/proposal/stop':
+                            keys(());result={'ok':True,'automatic_motion_enabled':False}
+                        elif path=='/api/start':result=runner.start(data)
                         elif path=='/api/end-run':
                             keys(('settings',));result=runner.end_run(data.get('settings'))
                         else:
                             keys(());result=runner.stop()
+                elif path=='/api/proposal/heartbeat':
+                    keys(('job_id',));result=bridge.heartbeat(data.get('job_id'))
                 elif path=='/api/estimate':
                     keys(('kind','episodes','task','trials','compute'));result=runner.estimate_run(**data)
                 elif path=='/api/session-settings':
@@ -155,7 +169,7 @@ def make_handler(runner,token,quit_event,cloud,instance_id='test-instance'):
                 elif path=='/api/hackclub/test':keys(('model',));result=cloud.test_connection(data.get('model','qwen/qwen3-32b'))
                 elif path=='/api/hackclub/review':
                     keys(('model',));result=cloud.review_results(runner.experience_summary(),data.get('model','qwen/qwen3-32b'))
-                elif path=='/api/quit':keys(());runner.stop();quit_event.set();result={'ok':True}
+                elif path=='/api/quit':keys(());bridge.stop();runner.stop();quit_event.set();result={'ok':True}
                 else:return self.send(404,{'error':'No such endpoint. No hardware-control backend exists.'})
                 return self.send(200,result)
             except (ValueError,TypeError,KeyError,OSError,RuntimeError) as e:return self.send(400,{'error':str(e)})

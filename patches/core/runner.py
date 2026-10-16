@@ -377,7 +377,9 @@ class Runner:
                     vals=[r[key] for r in rows];n=sum(v['trials'] for v in vals);passed=sum(v['successes'] for v in vals)
                     return {'task':task,'trials':n,'successes':passed,'success_rate':passed/n,
                             'mean_error_mm':float(np.mean([v['mean_error_mm'] for v in vals]))}
-                result={'model_id':self.model_id,'observation_mode':'two_rgb_cameras' if self.is_camera else 'privileged_simulator_state','current':combine('current'),'random_actions':combine('random_actions'),'by_task':rows,'fault_test':faults,
+                from .proposal_policy import runtime_contract
+                result={'proposal_contract_sha256':runtime_contract(self.camera_config) if self.is_camera else None,
+                        'model_id':self.model_id,'observation_mode':'two_rgb_cameras' if self.is_camera else 'privileged_simulator_state','current':combine('current'),'random_actions':combine('random_actions'),'by_task':rows,'fault_test':faults,
                         'fingerprint_unchanged':before==current.signature(),'policy_fingerprint':before,'episodes_at_test':current.episodes,
                         'weights_updated':False,'physical_motion':False,'camera_config':dict(self.camera_config),
                         'note':'Fresh paired physics scenarios; faults scored separately. Finite sample, not hardware certification.'}

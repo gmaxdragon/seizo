@@ -1,4 +1,5 @@
 import {setupKeyUI} from './key_ui.js';
+import {setupProposalUI} from './proposal_ui.js';
 const $=id=>document.getElementById(id),token=document.querySelector('meta[name="lab-token"]').content;
 let view=null,status=null,play=null,epoch=0,busy=false,lastId=0,lastFrame=0,closed=false,evalSeen='';
 let controlSeq=Date.now()*1000;
@@ -6,7 +7,7 @@ let connected=false,graphicsReady=false,graphicsFailed=false,animationStarted=fa
 const TASKS=['reach','orient','push','lift','place','rotate','orient_place'];
 let suggestedLesson=null;
 async function api(path,body){
- if(body!==undefined&&['/api/start','/api/stop','/api/end-run'].includes(path))body={...body,control_seq:++controlSeq};
+ if(body!==undefined&&['/api/start','/api/stop','/api/end-run','/api/proposal/prepare','/api/proposal/stop'].includes(path))body={...body,control_seq:++controlSeq};
  const abort=new AbortController();
  const limit=path.includes('/hackclub/test')||path.includes('/hackclub/review')?40000:['/api/trial','/api/gripper-check'].includes(path)?180000:['/api/initial','/api/cameras/preview'].includes(path)?60000:15000;
  const timer=setTimeout(()=>abort.abort(),limit);
@@ -244,3 +245,5 @@ for(const id of ['episodes','compute','evalTrials','task','speed','source','faul
 $('hidePreviews').onchange=()=>{applyPreviewVisibility();saveSessionSoon();};
 $('keepAwake').onchange=saveSessionSoon;
 $('settingsClose').addEventListener('click',()=>{scheduleEstimates();saveSessionSoon();});
+
+setupProposalUI({api,show});

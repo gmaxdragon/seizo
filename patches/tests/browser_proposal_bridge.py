@@ -34,6 +34,7 @@ with tempfile.TemporaryDirectory() as td:
    page=browser.new_page(viewport={'width':1400,'height':1000});page.on('pageerror',lambda e:errors.append(str(e)))
    page.goto(f'http://127.0.0.1:{server.server_port}/',wait_until='domcontentloaded')
    page.wait_for_function("() => document.getElementById('wristFrame').naturalWidth>0",timeout=60000)
+   assert 'REAL ARM LOCKED' in page.locator('#physicalLock').inner_text()
    page.locator('#proposalPanel summary').click()
    page.locator('#proposalInstruction').fill('Lift the red cube')
    page.locator('#proposalPrepare').click()

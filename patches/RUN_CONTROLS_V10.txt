@@ -1,3 +1,6 @@
+CURRENT RELEASE: 2026.10.15-proposal-bridge-v11
+See START_HERE.txt. REAL ARM LOCKED.
+
 SEIZO RUN CONTROLS v10
 Build: seizo-run-controls-v10
 Use your existing START_SEIZO.bat. No replacement folder, reset, or new API key.

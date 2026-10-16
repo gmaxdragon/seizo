@@ -9,11 +9,13 @@ import argparse,http.server,json,secrets,signal,sys,threading,urllib.parse,webbr
 import time,uuid
 from core.startup import wait_ready, write_instance, existing_url, clear_instance
 from pathlib import Path
+from core.release_assets import ensure_assets
+ensure_assets()
 from core.runner import Runner,World
 from core.cloud import HackClubPlanner
 
 ROOT=Path(__file__).resolve().parent
-BUILD='seizo-proposal-bridge-dev-v1';PORT=8772
+BUILD='seizo-proposal-bridge-v11';PORT=8772
 
 class DataLock:
     def __init__(self,path):

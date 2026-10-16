@@ -58,7 +58,9 @@ def validated_manifest(doc):
         p=Path(name)
         if p.is_absolute() or '..' in p.parts or not p.parts or p.parts[0] in PROTECTED or str(p).startswith('.'):
             raise ValueError('Unsafe update path')
-        if name.startswith('web/assets/') and p.suffix not in ('.json','.glb'):
+        if (name.startswith('web/assets/') and p.suffix not in ('.json','.glb')
+                and name not in ('web/assets/camera_lod.json.gz',
+                                 'web/assets/room_fabric.png', 'web/assets/room_wood.png')):
             raise ValueError('Unexpected asset extension')
     return doc
 

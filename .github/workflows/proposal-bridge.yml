@@ -15,7 +15,9 @@ jobs:
     permissions:
       contents: write
     env:
-      MUJOCO_GL: egl
+      MUJOCO_GL: osmesa
+      PYOPENGL_PLATFORM: osmesa
+      LIBGL_ALWAYS_SOFTWARE: '1'
       OPENBLAS_NUM_THREADS: '1'
       OMP_NUM_THREADS: '1'
     steps:
@@ -54,10 +56,13 @@ jobs:
           shutil.copytree(root/'patches',app,dirs_exist_ok=True)
           (root/'runtime-path.txt').write_text(str(app))
           assert (app/'tests/test_proposal_bridge.py').is_file()
-      - name: Install simulation and browser test dependencies
+      - name: Install pinned simulation and CPU graphics test dependencies
         run: |
-          python -m pip install numpy mujoco pillow playwright
+          sudo apt-get update -qq
+          sudo apt-get install -y libosmesa6 libgl1-mesa-dri libegl1 libegl-mesa0
+          python -m pip install 'numpy<3' 'mujoco==3.3.7' pillow playwright
           python -m playwright install --with-deps chromium
+          python -c 'import mujoco; print("MuJoCo", mujoco.__version__)'
       - name: Run full application regression suite
         shell: bash
         run: |
@@ -92,4 +97,53 @@ jobs:
           path: |
             bridge-runtime/
             runtime-path.txt
+          retention-days: 7
+  windows_protocol:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    env:
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: seizo-proposal-bridge-20261015
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Assemble exact integration for Windows protocol and checkpoint tests
+        shell: python
+        run: |
+          import hashlib,json,pathlib,shutil,subprocess,tarfile
+          root=pathlib.Path('.')
+          expected=json.loads((root/'tools/proposal-integration-sha256.json').read_text())
+          def matches():
+              return all(hashlib.sha256((root/'patches'/n).read_bytes()).hexdigest()==h for n,h in expected.items())
+          if not matches():
+              subprocess.run(['git','apply','--check','tools/proposal-integration.patch'],check=True)
+              subprocess.run(['git','apply','tools/proposal-integration.patch'],check=True)
+          assert matches()
+          manifest=json.loads((root/'desktop_manifest.json').read_text());archive=root/'Seizo_Learn_Web.tar.xz'
+          assert hashlib.sha256(archive.read_bytes()).hexdigest()==manifest['base']['sha256']
+          dest=root/'bridge-runtime';dest.mkdir()
+          with tarfile.open(archive,'r:xz') as tf:tf.extractall(dest,filter='data')
+          candidates=[p.parent for p in dest.rglob('app.py') if (p.parent/'core').is_dir()]
+          assert len(candidates)==1
+          app=candidates[0];shutil.copytree(root/'patches',app,dirs_exist_ok=True)
+          (root/'runtime-path.txt').write_text(str(app))
+      - name: Install numerical dependency only
+        run: python -m pip install 'numpy<3'
+      - name: Windows protocol checkpoint HTTP and credential tests
+        shell: pwsh
+        run: |
+          Set-Location (Get-Content runtime-path.txt)
+          python -m unittest discover -s tests -p 'test_proposal*.py' -v 2>&1 | Tee-Object proposal-windows-tests.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m unittest discover -s tests -p 'test_key_storage.py' -v 2>&1 | Tee-Object proposal-windows-key-tests.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: seizo-proposal-windows-tests
+          path: bridge-runtime/**/proposal-windows*.txt
           retention-days: 7

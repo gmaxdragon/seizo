@@ -8,8 +8,8 @@ from core.cloud import HackClubPlanner
 root=Path(__file__).resolve().parents[1];out=root/'feedback-evidence';out.mkdir(exist_ok=True)
 with tempfile.TemporaryDirectory() as td:
     r=default_runner(td);cloud=HackClubPlanner()
-    from feedback_smoke_helpers import train_one_real_batch_and_stop
-    train_one_real_batch_and_stop(r)
+    r.start({'episodes':2,'task':'reach','compute':'fast'});r.thread.join(100)
+    assert not r.thread.is_alive() and r.status!='error',r.error
     assert r.feedback.last_update is not None
     server=Server(('127.0.0.1',0),make_handler(r,'feedback-browser-test',threading.Event(),cloud))
     thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start();errors=[]
@@ -23,7 +23,7 @@ with tempfile.TemporaryDirectory() as td:
             result=page.evaluate("""async()=>{const token=document.querySelector('meta[name="lab-token"]').content;
                 const r=await fetch('/api/evaluate',{method:'POST',headers:{'X-Lab-Token':token,'Content-Type':'application/json'},body:JSON.stringify({task:'reach',trials:1})});return r.json()}""")
             assert result.get('ok'),result
-            page.wait_for_function("() => document.getElementById('mistakeProof').textContent.includes('small sample not proof')",timeout=180000)
+            page.wait_for_function("() => document.getElementById('mistakeProof').textContent.includes('small sample not proof')",timeout=100000)
             page.locator('#mistakePanel').screenshot(path=str(out/'learning_feedback.png'))
             assert not errors,errors
             summary={'browser':'actual Chromium','training_transitions':r.feedback.steps,

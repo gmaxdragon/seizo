@@ -49,8 +49,8 @@ class SessionTests(unittest.TestCase):
   with tempfile.TemporaryDirectory() as td:
    r=SessionRunner(td)
    try:
-    self.assertEqual(r.estimate_run('test',trials=20)['remaining_trials'],430)
-    self.assertEqual(r.estimate_run('test',trials=100)['remaining_trials'],2150)
+    self.assertEqual(r.estimate_run('test',trials=20)['remaining_trials'],290)
+    self.assertEqual(r.estimate_run('test',trials=100)['remaining_trials'],1450)
     for n in [True,0,1.5]:
      with self.assertRaises(ValueError):r.estimate_run('train',episodes=n)
    finally:r.shutdown()

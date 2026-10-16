@@ -99,8 +99,8 @@ class ActualSimulator(unittest.TestCase):
         from core.view_runner import ViewRunner
         with tempfile.TemporaryDirectory() as td:
             r=ViewRunner(td);r.save();old=(Path(td)/'policy.npz').read_bytes()
-            from feedback_smoke_helpers import train_one_real_batch_and_stop
-            train_one_real_batch_and_stop(r)
+            r.start({'task':'reach','episodes':2,'compute':'fast'});r.thread.join(100)
+            if r.thread.is_alive():r.stop();r.thread.join(20);self.fail('Training did not finish')
             self.assertNotEqual(r.status,'error',r.error)
             self.assertEqual((Path(td)/'pre_feedback_v12.npz').read_bytes(),old)
             self.assertGreater(r.feedback.steps,0);self.assertIsNotNone(r.feedback.last_update)

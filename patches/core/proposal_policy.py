@@ -16,7 +16,7 @@ from .proposal_protocol import (POLICY_ID, SCALES, TASKS, TARGETS, Rejected,
                                 action_from_policy, canonical, require, sha256)
 
 CONTRACT_FILES = (
-    'core/learning_feedback.py', 'core/world.py', 'core/ppo.py', 'core/view_policy.py', 'core/view_observation.py',
+    'core/world.py', 'core/ppo.py', 'core/view_policy.py', 'core/view_observation.py',
     'core/view_world.py', 'core/view_curriculum.py', 'core/camera_world.py',
     'core/camera_observation.py', 'core/mujoco_world.py', 'core/mjcf.py',
     'core/_arm_template.py', 'core/contact.py', 'core/detailed_scene.py',

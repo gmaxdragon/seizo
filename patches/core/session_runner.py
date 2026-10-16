@@ -54,7 +54,7 @@ class SessionRunner(ViewRunner):
 
     def _eval_plan(self,task,trials):
         profile=self._profile('test');names=TASKS if task=='all' else (task,)
-        plan={self.timing.key(profile,'eval_'+label,name):trials for name in names for label in ('policy','random')}
+        plan={self.timing.key(profile,'eval_'+label,name):trials for name in names for label in ('policy','random','reference')}
         plan[self.timing.key(profile,'eval_fault','reach')]=max(5,trials//2)
         return plan
 
@@ -99,18 +99,19 @@ class SessionRunner(ViewRunner):
                     self.timing.completed(key)
         self._train_last_time=now
 
-    def record_trial_time(self,task,random_policy,seconds,fault_probability=0.):
-        key=self.timing.key(self._profile('test'),'eval_'+('fault' if fault_probability else ('random' if random_policy else 'policy')),task)
+    def record_trial_time(self,task,random_policy,seconds,fault_probability=0.,label=None):
+        key=self.timing.key(self._profile('test'),'eval_'+(label or ('fault' if fault_probability else ('random' if random_policy else 'policy'))),task)
         self.timing.record(key,seconds)
         if self.status in ('evaluating','stopping'):
             self.timing.completed(key)
 
-    def begin_evaluation(self,task='all',trials=20):
-        self._reject_while_ending()
+    def begin_evaluation(self,task='all',trials=20,_inline=False):
+        if _inline and self.stop_event.is_set():return {'ok':False,'cancelled':True}
+        if not _inline:self._reject_while_ending()
         if self.status in BUSY:raise ValueError('End the current run before testing')
         if task not in TASKS+('all',) or type(trials)is not int or not 1<=trials<=100:raise ValueError('Invalid test setting')
         self.timing.start('test',self._eval_plan(task,trials));self.end_state=None
-        try:return super().begin_evaluation(task,trials)
+        try:return super().begin_evaluation(task,trials,_inline=_inline)
         except Exception:self.timing.finish();raise
 
     def trial(self,*args,**kwargs):

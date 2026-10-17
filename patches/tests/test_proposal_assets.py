@@ -64,7 +64,7 @@ class OriginalInstalledUpdater(unittest.TestCase):
             ensure_assets(root)
             for name in FILES:self.assertEqual((root/'web/assets'/name).read_bytes(),(APP/'web/assets'/name).read_bytes())
             self.assertIn('from core.release_assets import ensure_assets',(root/'app.py').read_text())
-            self.assertIn('seizo-learning-feedback-v12',(root/'app.py').read_text())
+            self.assertIn('seizo-windows-render-v13',(root/'app.py').read_text())
             self.assertLessEqual(len(manifest['patches']),80)
 
 if __name__=='__main__':unittest.main()

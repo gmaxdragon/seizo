@@ -30,8 +30,8 @@ def sha(raw):
 
 
 def check_updaters(manifest):
-    for name in ("seizo_updater.py","release-legacy-updater.py"):
-        spec=importlib.util.spec_from_file_location("updater_check_"+name.replace(".","_"),ROOT/name)
+    for name in ("seizo_updater.py","tools/legacy_updater_reference.py"):
+        spec=importlib.util.spec_from_file_location("updater_check_"+name.replace("/","_").replace(".","_"),ROOT/name)
         obj=importlib.util.module_from_spec(spec)
         spec.loader.exec_module(obj)
         obj.validated_manifest(manifest)

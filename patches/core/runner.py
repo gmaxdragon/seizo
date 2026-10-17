@@ -64,14 +64,17 @@ def evaluate(agent,task,n=20,seed=810017,random_policy=False,stop=None,fault_pro
     k=sum(int(r['success']) for r in records);faults=sum(int(r['fault']) for r in records)
     rate=k/n;z=1.96;den=1+z*z/n
     mid=(rate+z*z/(2*n))/den;half=z*((rate*(1-rate)/n+z*z/(4*n*n))**.5)/den
-    reasons={}
+    reasons={};guard_reasons={}
     for r in records:
         name=str(r.get('failure_reason','success' if r['success'] else 'unclassified'))
         reasons[name]=reasons.get(name,0)+1
+        guard=str(r.get('guard_reason',''))
+        if guard:guard_reasons[guard]=guard_reasons.get(guard,0)+1
     return {'outcomes':[{'success':bool(r['success']),'fault':bool(r['fault']),
             'invalid_physics':bool(r.get('invalid_physics',False)),
-            'reason':str(r.get('failure_reason','unclassified'))} for r in records],
-        'failure_counts':reasons,'feedback_version':FEEDBACK_VERSION,
+            'reason':str(r.get('failure_reason','unclassified')),
+            'guard_reason':str(r.get('guard_reason',''))} for r in records],
+        'failure_counts':reasons,'guard_counts':guard_reasons,'feedback_version':FEEDBACK_VERSION,
         'task':task,'trials':n,'successes':k,'failures':n-k-faults,'success_rate':rate,
         'success_interval_95':[max(0.,mid-half),min(1.,mid+half)],
         'mean_return':float(np.mean([r['return'] for r in records])),

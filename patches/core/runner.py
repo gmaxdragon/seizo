@@ -374,16 +374,25 @@ class Runner:
             w=self.World(1,seed,task,fault_probability=1. if fault else 0.,**self.world_options())
             if fault:w.fault_at[0]=3
             frames=[w.frame()];success=False;failed=False;signature=agent.signature();rng=np.random.default_rng(seed+1)
+            final_info=None
             with self.lock:self.preview_frame=frames[0];self.preview_serial+=1
             for _ in range(220):
                 if self.stop_event.is_set():raise InterruptedError('Watch test cancelled, not a pass.')
                 actions=agent.act(w.observation(),deterministic=agent.updates>0,rng=rng)[0]
                 _,_,term,trunc,info=w.step(actions);frames.append(w.frame())
+                final_info=info
                 if len(frames)%8==0:
                     with self.lock:self.preview_frame=frames[-1];self.preview_serial+=1
                 if term[0] or trunc[0]:success=bool(info['success'][0]);failed=bool(info['fault'][0]);break
             assert signature==agent.signature()
-            return {'frames':frames,'success':success,'fault':failed,'source':source,'seed':seed,
+            last=final_info or {}
+            why=str(last.get('failure_reason',['unclassified'])[0]) if final_info is not None else 'no_steps'
+            abort=frames[-1].get('safety_abort','')
+            invalid=bool(last.get('invalid_physics',[False])[0]) if final_info is not None else False
+            return {'frames':frames,'success':success,'fault':failed,
+                    'failure_reason':why,'safety_abort':abort,'invalid_physics':invalid,
+                    'terminated_after_steps':len(frames)-1,
+                    'source':source,'seed':seed,
                     'task':task,'policy_updates':agent.updates,'policy_fingerprint':signature,'weights_updated':False,
                     'observation_mode':'two_rgb_cameras' if self.is_camera else 'privileged_simulator_state',
                     'physical_motion':False,'episode_moves':len(frames)-1}

@@ -1,0 +1,26 @@
+name: Watch Guard Diagnostics
+on:
+  push:
+    branches: [seizo-v13-watch-guard-diagnostics-20261017]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Test staged Watch code
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/seizo-runtime
+          tar -xJf Seizo_Learn_Web.tar.xz -C /tmp/seizo-runtime
+          cp -r patches/. /tmp/seizo-runtime/Seizo_Learn/
+          cd /tmp/seizo-runtime/Seizo_Learn
+          python -m py_compile core/runner.py
+          python -m unittest -v tests.test_watch_guard_diagnostics
+          node --input-type=module --check < web/app.js

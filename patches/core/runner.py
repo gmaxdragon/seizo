@@ -220,11 +220,11 @@ class Runner:
 
     def _train(self):
         env=None
-        if self.stop_event.is_set():
-            self.save()
-            with self.lock:self.status='paused' if self.agent.steps else 'ready'
-            return
         try:
+            if self.stop_event.is_set():
+                self.save()
+                with self.lock:self.status='paused' if self.agent.steps else 'ready'
+                return
             env=self.World(n=getattr(self.World,'training_envs',(2 if MODEL_ID==MODEL_VERSION else 8)),seed=int(self.agent.rng.integers(1,2**30)),task=self.config['task'],fault_probability=self.config['fault_probability'],**self.world_options())
             env.stage=self.stage;env.reset();trace=[env.frame()];last_save=time.monotonic();validation_interval=2048 if self.is_camera else 16000;next_eval=self.agent.steps+validation_interval
             with self.lock:self.preview_frame=trace[0];self.preview_serial+=1

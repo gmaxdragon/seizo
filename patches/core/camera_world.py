@@ -78,6 +78,8 @@ class CameraWorld(MuJoCoWorld):
         self.camera_rng=np.random.default_rng(seed+7933)
         self.floor_heights=np.full(int(n),base.FLOOR)
         self.scene_settings=[None]*int(n);self.guard_reason=['']*int(n)
+        # Reject unsafe simulated actions while allowing bounded exploration.
+        self.consecutive_guard_rejections=np.zeros(int(n),dtype=np.int32)
         self._camera_ready=False;self._renderer=None;self._render_thread=None
         self._cached=[None]*int(n);self._current=np.zeros((int(n),2,HEIGHT,WIDTH,3),np.uint8)
         self._previous=self._current.copy()
@@ -123,6 +125,7 @@ class CameraWorld(MuJoCoWorld):
         if not len(ids):return
         for i in ids:
             self._sample(int(i));self.guard_reason[int(i)]=''
+            self.consecutive_guard_rejections[int(i)]=0
             self._cached[int(i)]=None;self._current[int(i)]=0;self._previous[int(i)]=0
             self._ages[int(i)]=0;self._available[int(i)]=True;self._previous_action[int(i)]=0
         super().reset(ids)
@@ -193,8 +196,9 @@ class CameraWorld(MuJoCoWorld):
     def _integrate(self,i):
         if not self._camera_ready:return super()._integrate(i)
         m=self.model;d=self.data[i]
-        # Save the accepted physical state. If a substep violates the guard, roll
-        # the trial back and abort; never report the blocked move as a success.
+        # Roll an unsafe simulator command back to the last accepted state.
+        # Penalize the command via ViewWorld.step, permitting more exploration.
+        # Repeated rejected commands terminate after 12 failures.
         state_spec=int(mujoco.mjtState.mjSTATE_INTEGRATION)
         before=np.empty(mujoco.mj_stateSize(m,state_spec))
         mujoco.mj_getState(m,d,before,state_spec)
@@ -210,8 +214,13 @@ class CameraWorld(MuJoCoWorld):
             if reason:
                 mujoco.mj_setState(m,d,before,state_spec);mujoco.mj_forward(m,d)
                 self.targetq[i]=self.q[i].copy();self._command(d,self.targetq[i])
-                self.physics_failures[i]=True;self.guard_reason[i]=reason
+                self.consecutive_guard_rejections[i]+=1
+                self.guard_reason[i]=reason
+                if self.consecutive_guard_rejections[i]>=12:
+                    self.physics_failures[i]=True
                 return
+        self.consecutive_guard_rejections[i]=0
+        self.guard_reason[i]=''
 
     def _render(self,i):
         if self._cached[i] is not None:return

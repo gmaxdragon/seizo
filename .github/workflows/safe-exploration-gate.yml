@@ -1,0 +1,26 @@
+name: Safe Exploration Gate
+on:
+  push:
+    branches: [seizo-v13-watch-guard-diagnostics-20261017]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    env:
+      MUJOCO_GL: egl
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install numpy mujoco pillow
+      - run: |
+          set -euo pipefail
+          tar -xJf Seizo_Learn_Web.tar.xz
+          cp -r patches/. Seizo_Learn/
+          cd Seizo_Learn
+          python -m unittest -v tests.test_safe_exploration

@@ -28,7 +28,7 @@ function task(){const s=$('task').value;return TASKS.includes(s)?s:s==='all'?TAS
 let cameraURLs={},lastCameraSerial=-1,focusedCamera=null;
 const CAMERA_NAMES=['overhead','wrist','side','front'];
 function cameraFrames(frame){
- const c=frame?.cameras;if(!c||$('hidePreviews').checked)return;
+ const c=frame?.cameras;if(!c||($('hidePreviews').checked&&!play))return;
  for(const [name,id] of CAMERA_NAMES.map(name=>[name,name+'Frame'])){
   if(!c[name])continue;
   if(cameraURLs[name])URL.revokeObjectURL(cameraURLs[name]);
@@ -55,7 +55,7 @@ function show(f){
 function begin(trace,label){play={trace,index:0,at:0,label,generation:epoch};show(trace.frames[0]);$('overlay').textContent=label;}
 function frame(t){
  try {
- if(graphicsFailed||$('hidePreviews').checked||document.hidden){lastFrame=t;return;}
+ if(graphicsFailed||($('hidePreviews').checked&&!play)||document.hidden){lastFrame=t;return;}
  const dt=lastFrame?Math.min(200,t-lastFrame):0;lastFrame=t;
  if(play&&play.generation===epoch){
   play.at+=dt;const ms=+$('speed').value;
@@ -63,7 +63,13 @@ function frame(t){
   // Render a recorded observation only when playback advances, not 60 times per second.
   if(play.at>=ms){play.at=0;play.index++;
    if(play.index<fs.length){show(fs[play.index]);$('overlay').textContent=`${play.label} · move ${play.index}/${fs.length-1}`;}
-   else{const p=play;play=null;$('outcome').textContent=p.trace.diagnostic?p.trace.diagnostic_message:p.trace.fault?'Trial stopped on an injected fault. This is a supervisor test, not learned safety.':p.trace.success?'This virtual trial reached its success criteria. Check progress tests more fresh scenes.':'This trial did not succeed. No scripted rescue or replacement was used.';}
+   else{const p=play;play=null;$('outcome').textContent=p.trace.diagnostic?p.trace.diagnostic_message:
+    p.trace.success?'This virtual trial reached its success criteria. Check fresh evaluation scores.':
+    'Watch ended after '+(p.trace.terminated_after_steps??fs.length-1)+' moves. Reason: '+
+    (p.trace.failure_reason||'unclassified')+
+    (p.trace.safety_abort?' / guard: '+p.trace.safety_abort:'')+
+    (p.trace.invalid_physics?' / invalid physics: yes':'')+
+    '. No physical robot motion occurred.';}
   }
  }
  view?.renderer.render();
@@ -72,7 +78,7 @@ function frame(t){
 }
 $('train').onclick=async()=>{busy=true;controls();epoch++;play=null;try{say('Starting local neural training...');await api('/api/start',{episodes:+$('episodes').value,task:$('task').value,compute:$('compute').value,fault_probability:0});lastId=0;await poll();}catch(e){fail(e)}finally{busy=false;controls()}};
 $('stop').onclick=async()=>{epoch++;play=null;say('Run cancellation requested. Saving at the next safe boundary. This tab stays open.');try{await api('/api/end-run',{settings:sessionSettings()});await poll();}catch(e){fail(e)}};
-$('watch').onclick=async()=>{busy=true;controls();const id=++epoch;play=null;say('Running a frozen virtual-policy trial...');try{const tr=await api('/api/trial',{task:task(),source:$('source').value,fault:$('fault').checked});if(id!==epoch)return;begin(tr,tr.policy_updates?'Updated policy, skill not guaranteed':'Untrained neural policy: random exploration');say(tr.policy_updates?'Testing updated policy weights. Improvement is not guaranteed. No learning during this test.':'Watching the untrained policy. It has not learned yet.');}catch(e){fail(e)}finally{busy=false;controls()}};
+$('watch').onclick=async()=>{busy=true;controls();const id=++epoch;play=null;say('Running a frozen virtual-policy trial...');try{const tr=await api('/api/trial',{task:task(),source:$('source').value,fault:$('fault').checked});if(id!==epoch)return;begin(tr,tr.policy_updates?'Updated policy, skill not guaranteed':'Untrained neural policy: random exploration');$('outcome').textContent='Watch returned '+tr.episode_moves+' movements; '+(tr.safety_abort?'guard '+tr.safety_abort:'reason '+(tr.failure_reason||'unclassified'))+'. Playing the recorded result now.';say(tr.policy_updates?'Testing saved policy. No learning during this test.':'Testing untrained neural policy.');}catch(e){fail(e)}finally{busy=false;controls()}};
 $('evaluate').onclick=async()=>{epoch++;play=null;try{say('Testing ALL seven tasks, before-training reference and paired random baselines. No cloud calls or weight updates.');await api('/api/evaluate',{task:'all',trials:+$('evalTrials').value});await poll()}catch(e){fail(e)}};
 let polling=false;
 async function poll(){if(polling||closed)return;polling=true;try{status=await api('/api/status');showFeedback(status);restoreSettings(status);showTiming(status);connected=true;$('connection').textContent='Local app connected · '+location.host;$('connection').className='online';let s=status;if(!play&&s.live_camera&&s.live_camera.serial!==lastCameraSerial){lastCameraSerial=s.live_camera.serial;cameraFrames(s.live_camera);}const nf=n=>Number(n).toLocaleString();$('physicsBadge').textContent=s.build+' · '+s.physics;$('progress').textContent=`${nf(s.episodes)} / ${nf(s.target_episodes)} completed episodes · ${nf(s.moves)} movements · ${nf(s.updates)} network updates`;$('saveStatus').textContent=s.save_verified&&s.saved_fingerprint===s.policy_fingerprint?

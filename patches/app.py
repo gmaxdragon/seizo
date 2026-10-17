@@ -15,7 +15,7 @@ from core.runner import Runner,World
 from core.cloud import HackClubPlanner
 
 ROOT=Path(__file__).resolve().parent
-BUILD='seizo-learning-feedback-v12';PORT=8772
+BUILD='seizo-windows-render-v13';PORT=8772
 
 class DataLock:
     def __init__(self,path):
@@ -39,9 +39,13 @@ class Server(http.server.ThreadingHTTPServer):
     allow_reuse_address=True
 
 
-def make_handler(runner,token,quit_event,cloud,instance_id='test-instance'):
+def make_handler(runner,token,quit_event,cloud,instance_id='test-instance',render_dispatch=None):
     from core.proposal_bridge import ProposalBridge
-    bridge=ProposalBridge(runner,cloud)
+    bridge=ProposalBridge(runner,cloud,render_dispatch=render_dispatch)
+    def render_call(fn):
+        # Context creation and destruction must run on the process main thread
+        # under GLFW on Windows; HTTP handlers run on separate threads.
+        return render_dispatch.call(fn,timeout=20) if render_dispatch else fn()
     key_commands=threading.Lock();key_state={'seq':-1}
     command_lock=threading.Lock();command_state={'seq':-1}
     def strict_json(raw):
@@ -78,7 +82,10 @@ def make_handler(runner,token,quit_event,cloud,instance_id='test-instance'):
                 if path=='/api/experience':return self.send(200,runner.experience_summary())
                 if path=='/api/initial':
                     if runner.is_camera:
-                        try:return self.send(200,runner.camera_preview())
+                        try:
+                            if runner.status in ('training','stopping','evaluating','watching'):
+                                return self.send(200,runner.camera_preview())
+                            return self.send(200,render_call(lambda:runner.camera_preview()))
                         except (ValueError,RuntimeError) as e:
                             return self.send(503,{'error':str(e)[:500]})
                     return self.send(200,World(1,seed=61).frame())
@@ -134,14 +141,14 @@ def make_handler(runner,token,quit_event,cloud,instance_id='test-instance'):
                 elif path=='/api/trial':
                     keys(('task','source','fault','seed'))
                     if type(data.get('fault',False))is not bool:raise ValueError('Invalid fault setting.')
-                    result=runner.trial(**data)
+                    result=render_call(lambda:runner.trial(**data))
                 elif path=='/api/gripper-check':
                     keys(('mode',))
                     with runner.lock:
                         if runner.status in ('training','stopping','evaluating','watching'):
                             raise ValueError('Stop and save before checking the gripper.')
                     from core.gripper_check import run_check
-                    result=run_check(data.get('mode','open_close'))
+                    result=render_call(lambda:run_check(data.get('mode','open_close')))
                 elif path=='/api/evaluate':
                     keys(('task','trials'));result=runner.begin_evaluation(data.get('task','all'),data.get('trials',20))
                 elif path=='/api/views/config':
@@ -150,7 +157,7 @@ def make_handler(runner,token,quit_event,cloud,instance_id='test-instance'):
                     keys(('profile','overhead_height_m','overhead_side_m','wrist_mount','frame_faults','framing','wrist_height_m'))
                     result=runner.set_cameras(data)
                 elif path=='/api/cameras/preview':
-                    keys(());result=runner.camera_preview(resample=True)
+                    keys(());result=render_call(lambda:runner.camera_preview(resample=True))
                 elif path=='/api/reset':
                     keys(('confirmed',))
                     if data.get('confirmed') is not True:raise ValueError('Confirm backup and reset first.')
@@ -203,10 +210,15 @@ def main():
             return
         raise
     runner=None;server=None;worker=None;instance=uuid.uuid4().hex
+    render_dispatch=None
     quit_event=threading.Event()
     try:
         # Existing state policies and shared credentials remain untouched.
         runner=default_runner(a.data_dir)
+        if os.name=='nt':
+            from core.main_thread_renderer import MainThreadRenderer
+            render_dispatch=MainThreadRenderer()
+            runner.render_dispatch=render_dispatch
         print('Input mode: DETAILED SIMULATED VIEWS. Helper views during exploration; all scored tests use wrist + overhead only.',flush=True)
         cloud=HackClubPlanner(audit_path=a.data_dir/'api_usage.json');token=secrets.token_urlsafe(32)
         try:
@@ -218,7 +230,7 @@ def main():
                 kernel.SetPriorityClass(kernel.GetCurrentProcess(),0x4000)
             else:os.nice(5)
         except Exception:pass
-        handler=make_handler(runner,token,quit_event,cloud,instance)
+        handler=make_handler(runner,token,quit_event,cloud,instance,render_dispatch=render_dispatch)
         try:server=Server(('127.0.0.1',a.port),handler)
         except OSError:
             server=Server(('127.0.0.1',0),handler)
@@ -230,7 +242,10 @@ def main():
             raise RuntimeError('Local readiness check failed. Browser was not opened. See logs/startup.log.')
         write_instance(a.data_dir,server.server_port,instance,BUILD)
         url=f'http://127.0.0.1:{server.server_port}/?build={BUILD}'
-        for sig in (signal.SIGINT,signal.SIGTERM):signal.signal(sig,lambda *args:quit_event.set())
+        def stop_app(*_args):
+            quit_event.set()
+            if runner:runner.stop()
+        for sig in (signal.SIGINT,signal.SIGTERM):signal.signal(sig,stop_app)
         print('\nSEIZO READY: '+url,flush=True)
         print('Local server responded successfully before opening your browser.',flush=True)
         print('Keep this terminal open. The API-key controls are on the main page.',flush=True)
@@ -239,15 +254,28 @@ def main():
             try:
                 if not webbrowser.open(url):print('Open the exact READY address above in your browser.',flush=True)
             except Exception:print('Open the exact READY address above in your browser.',flush=True)
-        while not quit_event.wait(.25):pass
+        while not quit_event.is_set():
+            if render_dispatch is not None:
+                # The HTTP server is already listening in another thread.
+                # MuJoCo/GLFW runs on this process main thread.
+                render_dispatch.pump(timeout=.25)
+            else:
+                quit_event.wait(.25)
     finally:
         try:
-            if runner:runner.shutdown()
+            if runner:
+                runner.stop()
+                if render_dispatch is not None and runner.thread and runner.thread.is_alive():
+                    # A queued, not-yet-started run must see STOP, save and
+                    # finish before the dispatcher is shut down.
+                    render_dispatch.pump(timeout=0)
+                runner.shutdown()
         finally:
             if server:
                 if worker:server.shutdown()
                 server.server_close()
             if worker:worker.join(timeout=3)
+            if render_dispatch is not None:render_dispatch.close()
             clear_instance(a.data_dir,instance)
             lock.close()
         print('Saved. You can close this terminal.',flush=True)

@@ -1,0 +1,85 @@
+name: Seizo Windows Main-Thread Camera Repair
+
+on:
+  push:
+    branches: [seizo-v13-win-render-repair-20261017]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-dispatch:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Build patched runtime
+        shell: python
+        run: |
+          import tarfile,pathlib,shutil
+          with tarfile.open('Seizo_Learn_Web.tar.xz','r:xz') as tar:
+              tar.extractall('.',filter='data')
+          shutil.copytree('patches',pathlib.Path('Seizo_Learn'),dirs_exist_ok=True)
+      - name: Compile Windows runtime paths
+        working-directory: Seizo_Learn
+        run: python -m py_compile app.py core/runner.py core/proposal_bridge.py core/main_thread_renderer.py scripts/check_camera_gl.py
+      - name: Run platform-independent dispatch tests
+        working-directory: Seizo_Learn
+        run: python -m unittest -v tests.test_main_thread_renderer
+
+  linux-real-cameras:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      MUJOCO_GL: osmesa
+      PYOPENGL_PLATFORM: osmesa
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Build patched runtime
+        shell: python
+        run: |
+          import tarfile,pathlib,shutil
+          with tarfile.open('Seizo_Learn_Web.tar.xz','r:xz') as tar:
+              tar.extractall('.',filter='data')
+          shutil.copytree('patches',pathlib.Path('Seizo_Learn'),dirs_exist_ok=True)
+      - name: Install software OpenGL and MuJoCo
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libosmesa6 libgl1-mesa-dri
+          python -m pip install 'numpy<3' 'mujoco==3.3.7' pillow
+      - name: Check actual MuJoCo RGB render and lifecycle
+        working-directory: Seizo_Learn
+        run: |
+          python scripts/check_camera_gl.py
+          python -m unittest -q tests.test_view_v9 tests.test_main_thread_renderer
+
+  evidence-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Offline CI does not validate Vivaan's Windows GPU or local 8,887-episode checkpoint."
+
+  package-candidate:
+    needs: [windows-dispatch, linux-real-cameras]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Package tested source and prove checkpoint sentinel unchanged
+        run: python tools/publish_renderer_v13.py

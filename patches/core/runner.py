@@ -94,6 +94,7 @@ class Runner:
         self.camera_config={}
         self.folder=Path(folder);self.folder.mkdir(parents=True,exist_ok=True)
         self.lock=threading.RLock();self.stop_event=threading.Event();self.thread=None
+        self.render_dispatch=None  # Windows GLFW context work is main-thread-only.
         self.status='ready';self.error='';self.agent=self.Agent();self.initial=self.Agent()
         self.stage=0;self.history=[];self.validation=None;self.last_evaluation=None;self.last_trace=None
         self.counts=[{'attempts':0,'successes':0,'safety_aborts':0} for _ in TASKS];self.recent=deque(maxlen=100)
@@ -190,7 +191,7 @@ class Runner:
         with self.lock:
             if self.thread and self.thread.is_alive():raise ValueError('Previous operation is still finishing.')
             if self.status in ('training','stopping','evaluating','watching'):raise ValueError('Stop the current operation first.')
-            if self.status=='error':raise ValueError(self.error+' Use a new empty data folder, do not overwrite your saved data.')
+            if self.status=='error':raise ValueError(self.error+' Restart Seizo without resetting its saved checkpoint.')
             resume=self.status=='paused' and all(cfg[k]==self.config[k] for k in ('episodes','task')) and self.target>self.agent.episodes
             # Preserve the user's exact starting point for a before/after test.
             # This is a reference copy, never an automatic replacement policy.
@@ -211,12 +212,19 @@ class Runner:
             if not resume:self.target=self.agent.episodes+cfg['episodes']
             self.stop_event.clear();self.status='training';self.error='';self.generation+=1
             self.started=time.monotonic();self.start_steps=self.agent.steps;self.start_episodes=self.agent.episodes
-            self.thread=threading.Thread(target=self._train,daemon=True);self.thread.start()
+            if self.render_dispatch is not None:
+                self.thread=self.render_dispatch.submit(self._train)
+            else:
+                self.thread=threading.Thread(target=self._train,daemon=True);self.thread.start()
         return {'ok':True,'resumed':resume,'target_episodes':self.target,'algorithm':'NumPy neural PPO','physical_motion':False}
 
     def _train(self):
         env=None
         try:
+            if self.stop_event.is_set():
+                self.save()
+                with self.lock:self.status='paused' if self.agent.steps else 'ready'
+                return
             env=self.World(n=getattr(self.World,'training_envs',(2 if MODEL_ID==MODEL_VERSION else 8)),seed=int(self.agent.rng.integers(1,2**30)),task=self.config['task'],fault_probability=self.config['fault_probability'],**self.world_options())
             env.stage=self.stage;env.reset();trace=[env.frame()];last_save=time.monotonic();validation_interval=2048 if self.is_camera else 16000;next_eval=self.agent.steps+validation_interval
             with self.lock:self.preview_frame=trace[0];self.preview_serial+=1
@@ -300,10 +308,25 @@ class Runner:
             self.save()
             with self.lock:self.status='paused'
         except Exception as e:
+            trace=traceback.format_exc()
+            # A failed OpenGL context is not a failed PPO checkpoint. Write
+            # and verify the latest coherent model/optimizer state right now,
+            # not only on the normal 25-second autosave interval.
+            try:
+                self.save()
+            except Exception as save_exc:
+                trace+='\nAdditional save error: '+repr(save_exc)+'\n'+traceback.format_exc()
             with self.lock:self.error=str(e);self.status='error'
-            (self.folder/'last_error.txt').write_text(traceback.format_exc())
+            (self.folder/'last_error.txt').write_text(trace,encoding='utf-8')
         finally:
-            if env is not None and hasattr(env,'close'):env.close()
+            if env is not None and hasattr(env,'close'):
+                try:env.close()
+                except Exception as close_exc:
+                    with self.lock:
+                        self.error=(self.error+'; ' if self.error else '')+'Renderer close failure: '+str(close_exc)
+                        self.status='error'
+                    (self.folder/'last_error.txt').write_text(
+                        'Renderer cleanup failed: '+traceback.format_exc(),encoding='utf-8')
 
     def stop(self):
         self.stop_event.set()
@@ -464,6 +487,8 @@ class Runner:
                 with self.lock:self.status='error';self.error=str(e)
                 (self.folder/'last_error.txt').write_text(traceback.format_exc())
         if _inline:run()
+        elif self.render_dispatch is not None:
+            self.thread=self.render_dispatch.submit(run)
         else:
             self.thread=threading.Thread(target=run,daemon=True);self.thread.start()
         return {'ok':True,'cloud_requests':0}

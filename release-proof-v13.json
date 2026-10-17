@@ -1,0 +1,18 @@
+{
+  "schema": "seizo-desktop-render-repair-proof/v13",
+  "version": "2026.10.17-windows-render-v13",
+  "source_commit": "86dc4a5aeb60e58ab0801821e2f2cd5cafa15283",
+  "checks": {
+    "windows_dispatch": "passed_workflow_dependency",
+    "linux_real_RGB": "passed_workflow_dependency",
+    "original_updater_install": "passed_local_package_test"
+  },
+  "patch_count": 51,
+  "protected_policy_replaced": false,
+  "current_user_policy_inspected": false,
+  "native_user_windows_gpu_verified": false,
+  "real_pi_connected": false,
+  "automatic_motion_enabled": false,
+  "physical_motion_executed": false,
+  "note": "Candidate only. Actual Windows GPU framebuffer must pass the local doctor."
+}

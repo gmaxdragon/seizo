@@ -18,7 +18,7 @@ REPO = Path(os.environ.get('SEIZO_RELEASE_REPO', '/nonexistent'))
 class PhysicalReleaseLock(unittest.TestCase):
     def test_release_label_and_visible_lock(self):
         from app import BUILD
-        self.assertEqual(BUILD, 'seizo-learning-feedback-v12')
+        self.assertEqual(BUILD, 'seizo-windows-render-v13')
         html = (APP/'web/index.html').read_text(encoding='utf-8')
         self.assertIn('REAL ARM LOCKED', html)
         self.assertIn('no motor connection', html)

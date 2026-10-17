@@ -67,3 +67,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: echo "Offline CI does not validate Vivaan's Windows GPU or local 8,887-episode checkpoint."
+
+  package-candidate:
+    needs: [windows-dispatch, linux-real-cameras]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Package tested source and prove checkpoint sentinel unchanged
+        run: python tools/publish_renderer_v13.py

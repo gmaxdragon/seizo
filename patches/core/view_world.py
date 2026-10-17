@@ -175,6 +175,8 @@ class ViewWorld(CameraWorld):
         info['failure_reason']=np.array([x['reason'] for x in self.last_feedback])
         info['feedback_penalty']=np.array([x['penalty'] for x in self.last_feedback])
         info['feedback_version']=np.array([FEEDBACK_VERSION]*self.n)
+        # Actual guard source; never infer it from the generic unsafe_action reward.
+        info['guard_reason']=np.array(self.guard_reason,dtype=str)
         return obs,reward,terminated,truncated,info
 
     def frame(self,i=0):

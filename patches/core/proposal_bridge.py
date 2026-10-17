@@ -14,8 +14,9 @@ LEASE_SECONDS = 8.
 
 
 class ProposalBridge:
-    def __init__(self, runner, cloud):
+    def __init__(self, runner, cloud, render_dispatch=None):
         self.runner, self.cloud = runner, cloud
+        self.render_dispatch = render_dispatch
         self.lock = threading.RLock()
         self.thread = None
         self.cancel = threading.Event()
@@ -102,8 +103,15 @@ class ProposalBridge:
             self._check()
             evidence = evaluation_evidence(self.runner.folder, identity, intent['task'], contract)
             self._publish(intent=intent, evaluation=evidence, api=usage, state='reading_saved_policy')
-            action, observation, frame, details = infer_saved_decision(
-                agent, intent, config, lambda: self.cancel.is_set() or time.monotonic() >= self.deadline)
+            def read_policy():
+                return infer_saved_decision(
+                    agent, intent, config, lambda: self.cancel.is_set() or time.monotonic() >= self.deadline)
+            # Windows GLFW creates the simulated camera context only on
+            # the process main thread. The cloud/API worker remains remote
+            # from that context and can still be stopped immediately.
+            action, observation, frame, details = (
+                self.render_dispatch.call(read_policy,timeout=20)
+                if self.render_dispatch is not None else read_policy())
             self._check()
             with self.runner.lock:
                 require(self.runner.generation == generation

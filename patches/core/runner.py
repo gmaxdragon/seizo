@@ -64,14 +64,17 @@ def evaluate(agent,task,n=20,seed=810017,random_policy=False,stop=None,fault_pro
     k=sum(int(r['success']) for r in records);faults=sum(int(r['fault']) for r in records)
     rate=k/n;z=1.96;den=1+z*z/n
     mid=(rate+z*z/(2*n))/den;half=z*((rate*(1-rate)/n+z*z/(4*n*n))**.5)/den
-    reasons={}
+    reasons={};guard_reasons={}
     for r in records:
         name=str(r.get('failure_reason','success' if r['success'] else 'unclassified'))
         reasons[name]=reasons.get(name,0)+1
+        guard=str(r.get('guard_reason',''))
+        if guard:guard_reasons[guard]=guard_reasons.get(guard,0)+1
     return {'outcomes':[{'success':bool(r['success']),'fault':bool(r['fault']),
             'invalid_physics':bool(r.get('invalid_physics',False)),
-            'reason':str(r.get('failure_reason','unclassified'))} for r in records],
-        'failure_counts':reasons,'feedback_version':FEEDBACK_VERSION,
+            'reason':str(r.get('failure_reason','unclassified')),
+            'guard_reason':str(r.get('guard_reason',''))} for r in records],
+        'failure_counts':reasons,'guard_counts':guard_reasons,'feedback_version':FEEDBACK_VERSION,
         'task':task,'trials':n,'successes':k,'failures':n-k-faults,'success_rate':rate,
         'success_interval_95':[max(0.,mid-half),min(1.,mid+half)],
         'mean_return':float(np.mean([r['return'] for r in records])),
@@ -374,16 +377,25 @@ class Runner:
             w=self.World(1,seed,task,fault_probability=1. if fault else 0.,**self.world_options())
             if fault:w.fault_at[0]=3
             frames=[w.frame()];success=False;failed=False;signature=agent.signature();rng=np.random.default_rng(seed+1)
+            final_info=None
             with self.lock:self.preview_frame=frames[0];self.preview_serial+=1
             for _ in range(220):
                 if self.stop_event.is_set():raise InterruptedError('Watch test cancelled, not a pass.')
                 actions=agent.act(w.observation(),deterministic=agent.updates>0,rng=rng)[0]
                 _,_,term,trunc,info=w.step(actions);frames.append(w.frame())
+                final_info=info
                 if len(frames)%8==0:
                     with self.lock:self.preview_frame=frames[-1];self.preview_serial+=1
                 if term[0] or trunc[0]:success=bool(info['success'][0]);failed=bool(info['fault'][0]);break
             assert signature==agent.signature()
-            return {'frames':frames,'success':success,'fault':failed,'source':source,'seed':seed,
+            last=final_info or {}
+            why=str(last.get('failure_reason',['unclassified'])[0]) if final_info is not None else 'no_steps'
+            abort=frames[-1].get('safety_abort','')
+            invalid=bool(last.get('invalid_physics',[False])[0]) if final_info is not None else False
+            return {'frames':frames,'success':success,'fault':failed,
+                    'failure_reason':why,'safety_abort':abort,'invalid_physics':invalid,
+                    'terminated_after_steps':len(frames)-1,
+                    'source':source,'seed':seed,
                     'task':task,'policy_updates':agent.updates,'policy_fingerprint':signature,'weights_updated':False,
                     'observation_mode':'two_rgb_cameras' if self.is_camera else 'privileged_simulator_state',
                     'physical_motion':False,'episode_moves':len(frames)-1}

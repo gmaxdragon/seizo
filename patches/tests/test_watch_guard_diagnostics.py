@@ -17,6 +17,9 @@ class WatchDiagnosticsTests(unittest.TestCase):
         self.assertIn("'invalid_physics':invalid",self.runner)
         self.assertIn("'terminated_after_steps':len(frames)-1",self.runner)
         self.assertIn("final_info=info",self.runner)
+        self.assertIn("'guard_counts':guard_reasons",self.runner)
+        world=(ROOT/"core/view_world.py").read_text()
+        self.assertIn("info['guard_reason']=np.array(self.guard_reason,dtype=str)",world)
 
     def test_hide_training_previews_does_not_hide_watch(self):
         self.assertIn("($('hidePreviews').checked&&!play)",self.js)

@@ -86,6 +86,15 @@ class FrozenWorldReuseTests(unittest.TestCase):
         self.assertIn('evaluation_world=shared_evaluation_world',source)
         self.assertIn('shared_evaluation_world.close()',source)
         self.assertNotIn('mujoco.viewer',source)
+    def test_training_frees_gl_context_before_validation(self):
+        from pathlib import Path
+        src=(Path(__file__).parents[1]/'core'/'runner.py').read_text()
+        training=src.split('    def _train(self):',1)[1].split('    def stop(self):',1)[0]
+        mid=training.split('if self.agent.steps>=next_eval and not stopped():',1)[1]
+        self.assertLess(mid.index('env.close()'),mid.index('val=evaluate('))
+        finish=training.split("self.agent.episodes-self.start_episodes>=10:",1)[1]
+        self.assertLess(finish.index('env.close()'),finish.index('self.begin_evaluation('))
+
     @unittest.skipUnless(os.environ.get('SEIZO_TEST_REAL_MUJOCO')=='1','Opt-in true rendered MuJoCo gate')
     def test_actual_rgb_and_guard_with_reused_renderer(self):
         from core.view_policy import Agent

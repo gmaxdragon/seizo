@@ -1,6 +1,6 @@
 {
   "schema": "seizo-desktop-manifest/v1",
-  "version": "2026.10.17-safe-exploration-v14",
+  "version": "2026.10.17-renderer-reuse-v15",
   "base": {
     "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/6aba13c4b4e1990125cf5e766feaf65dc89e66e8/Seizo_Learn_Web.tar.xz",
     "sha256": "4d639563b67233f68733c57915f7c5aec4568b6a929cd3ff9e7e39112b04da28"
@@ -51,8 +51,8 @@
       "sha256": "f34b23688c0a71b74c38cdf64a7270769dd68620783cf2cb62c6af5f08959275"
     },
     "app.py": {
-      "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/86dc4a5aeb60e58ab0801821e2f2cd5cafa15283/patches/app.py",
-      "sha256": "1737fe2d4230df84e476c70e3ab6db8ffc22fbc4085b6dd7e6fab0d713723617"
+      "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/e67a1e7dadc22442d6ac888c733ba382eef5cbf1/patches/app.py",
+      "sha256": "9b292bc5a404b822e53b290a6123e4c5738aac21afcbc709f47e3d362ef0147a"
     },
     "bootstrap.py": {
       "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/86dc4a5aeb60e58ab0801821e2f2cd5cafa15283/patches/bootstrap.py",
@@ -131,8 +131,8 @@
       "sha256": "b9af2ea06847948bd2a1e9cab7928fe364c8cd68fe80365c101f176ebe99cb49"
     },
     "core/runner.py": {
-      "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/17bbf05d979779530dd0a17cfdf2b3d35a31acb0/patches/core/runner.py",
-      "sha256": "eca9e37c4c0c09bc5814bee8ded9061f6bb3f1957e2ec58609c24e06599c6c0b"
+      "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/e7c5f478a016c4c15119a17b7fed00d649abe4fc/patches/core/runner.py",
+      "sha256": "70f62d32cec7b3d19a81af6aa634152b4f9a56bfbd2e728b456ec544b0ed5bcc"
     },
     "core/session_runner.py": {
       "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/86dc4a5aeb60e58ab0801821e2f2cd5cafa15283/patches/core/session_runner.py",
@@ -183,8 +183,8 @@
       "sha256": "3b13fd59cc3b39114eb9cfbf05998027d5088944fe3ffcb1a0ecc92ec78eac8c"
     },
     "web/index.html": {
-      "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/86dc4a5aeb60e58ab0801821e2f2cd5cafa15283/patches/web/index.html",
-      "sha256": "706bdcfd6005076f7f8bea83ac14d4ee722f7a2e66638f2b8e90bbee34ab90d8"
+      "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/e67a1e7dadc22442d6ac888c733ba382eef5cbf1/patches/web/index.html",
+      "sha256": "36aa319ffc401988245134a1e5da5ba35b90c3c85b428f15754372fb55f7b5aa"
     },
     "web/learning_view.js": {
       "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/86dc4a5aeb60e58ab0801821e2f2cd5cafa15283/patches/web/learning_view.js",
@@ -209,6 +209,10 @@
     "scripts/check_camera_gl.py": {
       "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/86dc4a5aeb60e58ab0801821e2f2cd5cafa15283/patches/scripts/check_camera_gl.py",
       "sha256": "2cccfdeb94542fddf24068f323b73729fd1adf52f270b3c3e48a23884851b70a"
+    },
+    "scripts/seizo_sim_bridge.py": {
+      "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/e67a1e7dadc22442d6ac888c733ba382eef5cbf1/patches/scripts/seizo_sim_bridge.py",
+      "sha256": "040b4bd3a5c19f90999f195c8887723fcbbeaa0643d64a86d154e62068ac486c"
     }
   }
 }

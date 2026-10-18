@@ -1,0 +1,33 @@
+name: Standalone Simulation Bridge
+on:
+  push:
+    branches: [seizo-phone-remote-v15-20261017]
+    paths:
+      - 'tools/seizo_sim_bridge.py'
+      - 'tools/tests/test_seizo_sim_bridge.py'
+      - '.github/workflows/simulation-bridge.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    env:
+      PYTHONPATH: tools
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: Compile bridge
+        run: python -m py_compile tools/seizo_sim_bridge.py
+      - name: Test private upload, fixed routes, fresh commands and at-most-once execution
+        run: python -m unittest discover -s tools/tests -p test_seizo_sim_bridge.py -v
+      - name: State test boundary
+        run: echo "Mock transport tests only. No user PC, real training, GitHub credentials, startup registration or robot I/O used."

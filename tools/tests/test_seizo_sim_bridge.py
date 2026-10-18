@@ -123,6 +123,11 @@ class Privacy(unittest.TestCase):
             f=Path(p)/'state.json';b.atomic(f,{'x':42})
             self.assertEqual(b.load(f),{'x':42})
             self.assertFalse(f.with_suffix('.json.next').exists())
+    def test_background_windows_commands_do_not_flash_consoles(self):
+        source=Path(b.__file__).read_text()
+        self.assertGreaterEqual(source.count("subprocess.CREATE_NO_WINDOW if os.name == 'nt'"),3)
+        self.assertIn('stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL',source)
+
     def test_report_staleness_explicit(self):
         r=b.sanitize(status(),'app','bridge',None,False)
         self.assertIn('older than 3 minutes',b.readme(r))

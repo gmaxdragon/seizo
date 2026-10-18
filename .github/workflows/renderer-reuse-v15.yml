@@ -1,0 +1,50 @@
+name: Reused MuJoCo Render Context
+on:
+  push:
+    branches: [seizo-phone-remote-v15-20261017]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  paired-evaluations:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            backend: osmesa
+            actual_physics: '1'
+          - os: windows-latest
+            backend: glfw
+            actual_physics: '0'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUTF8: '1'
+      MUJOCO_GL: ${{ matrix.backend }}
+      SEIZO_TEST_REAL_MUJOCO: ${{ matrix.actual_physics }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: Linux offscreen rendering dependency
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y libosmesa6 libosmesa6-dev
+      - name: Install physics and numeric libraries
+        run: python -m pip install --disable-pip-version-check numpy mujoco pillow
+      - name: Stage exact desktop source
+        run: |
+          tar -xJf Seizo_Learn_Web.tar.xz
+          cp -r patches/. Seizo_Learn/
+      - name: Check Python syntax
+        run: python -m py_compile Seizo_Learn/core/runner.py Seizo_Learn/core/view_world.py Seizo_Learn/core/main_thread_renderer.py
+      - name: Paired seeds, STOP cleanup, and one renderer per evaluation
+        run: |
+          cd Seizo_Learn
+          python -m unittest -v tests.test_renderer_reuse_v15
+      - name: Evidence boundary
+        run: echo "CI does not test the user's Windows GPU driver or real hardware; no checkpoint changed."

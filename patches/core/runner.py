@@ -287,7 +287,24 @@ class Runner:
                 if time.monotonic()-last_save>25:self.save();last_save=time.monotonic()
                 if self.agent.steps>=next_eval and not stopped():
                     clone=self.agent.clone();task=TASKS[self.stage] if self.config['task']=='curriculum' else (self.config['task'] if self.config['task'] in TASKS else 'reach')
+                    if self.is_camera and env is not None:
+                        # Windows/GLFW cannot reliably create a second offscreen
+                        # renderer while the training context is still active.
+                        # Stop at the batch boundary and release the GL context.
+                        env.close()
+                        env=None
                     val=evaluate(clone,task,getattr(self,'validation_trials',5 if self.is_camera else 24),seed=secrets.randbelow(2**30),stop=self.stop_event.is_set,world_factory=self.World,world_options=self.evaluation_options(),on_timing=getattr(self,'record_trial_time',None))
+                    if self.is_camera:
+                        # Explicitly start a fresh training scenario after the
+                        # held-out test, not a fabricated reward or teacher path.
+                        # A partially elapsed episode is discarded, never scored.
+                        env=self.World(n=getattr(self.World,'training_envs',1),
+                            seed=int(self.agent.rng.integers(1,2**30)),
+                            task=self.config['task'],fault_probability=self.config['fault_probability'],
+                            **self.world_options())
+                        env.stage=self.stage
+                        env.reset()
+                        frame(env,None)
                     if hasattr(self,'after_validation'):self.after_validation(val,env)
                     with self.lock:
                         self.validation=val
@@ -313,6 +330,11 @@ class Runner:
             self.save()
             with self.lock:self.status='paused' if self.stop_event.is_set() else 'complete'
             if self.is_camera and not self.stop_event.is_set() and self.agent.episodes-self.start_episodes>=10:
+                # Free training's GL context BEFORE the automatic frozen test;
+                # otherwise an overlapping GLFW/MjrContext can fail on Windows.
+                if env is not None:
+                    env.close()
+                    env=None
                 name=TASKS[self.stage] if self.config['task'] not in TASKS else self.config['task']
                 self.begin_evaluation(task=name,trials=5,_inline=True)
         except InterruptedError:

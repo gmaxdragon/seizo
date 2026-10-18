@@ -81,9 +81,12 @@ class GitHub:
         args = [self.exe, 'api', '--hostname', 'github.com', endpoint, '--method', method]
         if body is not None:
             args += ['--input', '-']
+        # A pythonw.exe parent has no console. Without CREATE_NO_WINDOW, every
+        # GitHub CLI subprocess can briefly flash a new black window on Windows.
         result = subprocess.run(args, input=None if body is None else dump(body),
                                 text=True, encoding='utf-8', capture_output=True,
-                                timeout=40, shell=False)
+                                timeout=40, shell=False,
+                                creationflags=(subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0))
         if result.returncode:
             raise Blocked('GITHUB_REQUEST_FAILED_CHECK_GH_LOGIN_AND_REPO_ACCESS')
         return json.loads(result.stdout) if result.stdout.strip() else {}
@@ -412,8 +415,14 @@ def install(allow_training=False):
     command = ("$s=(New-Object -ComObject WScript.Shell).CreateShortcut(" + ps(link) + ");"
                "$s.TargetPath=" + ps(python) + ";$s.Arguments=" + ps('"' + str(target) + '" run') + ";"
                "$s.WorkingDirectory=" + ps(HOME) + ";$s.Description='Seizo simulation-only monitor';$s.Save()")
-    subprocess.run(['powershell', '-NoProfile', '-Command', command], check=True, shell=False)
-    subprocess.Popen([str(python), str(target), 'run'], cwd=HOME, shell=False)
+    subprocess.run(['powershell', '-NoProfile', '-Command', command],
+                   check=True, shell=False,
+                   creationflags=(subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0))
+    # Keep the login bridge entirely silent; status/error reports are files.
+    subprocess.Popen([str(python), str(target), 'run'], cwd=HOME, shell=False,
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL,
+                     creationflags=(subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0))
     print('INSTALLED. Auto-starts at Windows sign-in; current Seizo run was not restarted.')
     print('Phone report: https://github.com/' + REPO + '/tree/' + BRANCH)
     print('Remote training:', 'up to 20 per request / 100 per UTC day' if allow_training else 'disabled')

@@ -131,8 +131,8 @@
       "sha256": "b9af2ea06847948bd2a1e9cab7928fe364c8cd68fe80365c101f176ebe99cb49"
     },
     "core/runner.py": {
-      "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/e67a1e7dadc22442d6ac888c733ba382eef5cbf1/patches/core/runner.py",
-      "sha256": "3b265461c5df5e682365919b8a33478c1e5047347ac0773ba62cabd36919b9c6"
+      "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/e7c5f478a016c4c15119a17b7fed00d649abe4fc/patches/core/runner.py",
+      "sha256": "70f62d32cec7b3d19a81af6aa634152b4f9a56bfbd2e728b456ec544b0ed5bcc"
     },
     "core/session_runner.py": {
       "url": "https://raw.githubusercontent.com/gmaxdragon/seizo/86dc4a5aeb60e58ab0801821e2f2cd5cafa15283/patches/core/session_runner.py",

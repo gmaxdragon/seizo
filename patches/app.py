@@ -15,7 +15,7 @@ from core.runner import Runner,World
 from core.cloud import HackClubPlanner
 
 ROOT=Path(__file__).resolve().parent
-BUILD='seizo-windows-render-v13';PORT=8772
+BUILD='2026.10.17-renderer-reuse-v15';PORT=8772
 
 class DataLock:
     def __init__(self,path):

@@ -37,16 +37,29 @@ def atomic_json(path,obj):
 
 
 def evaluate(agent,task,n=20,seed=810017,random_policy=False,stop=None,fault_probability=0.0,
-             world_factory=World,world_options=None,on_trial=None,on_timing=None):
+             world_factory=World,world_options=None,on_trial=None,on_timing=None,
+             evaluation_world=None):
     """Frozen policy. Camera cases run sequentially to bound GPU/CPU memory."""
     if task not in TASKS or type(n) is not int or not 1<=n<=200:raise ValueError('Invalid evaluation task/count.')
     signature=agent.signature();records=[]
-    for trial in range(n):
-        if stop and stop():raise InterruptedError('Evaluation stopped; no partial pass claimed.')
-        trial_started=time.perf_counter()
-        w=world_factory(n=1,seed=seed+trial*97,task=task,fault_probability=fault_probability,**(world_options or {}))
-        rng=np.random.default_rng(seed+trial*97+10)
-        try:
+    # One GL renderer across a series, not one newly opened GLFW window
+    # per trial. Re-seed physics and camera randomness for paired comparisons.
+    owns_world=evaluation_world is None
+    w=(world_factory(n=1,seed=seed,task=task,fault_probability=fault_probability,**(world_options or {}))
+       if owns_world else evaluation_world)
+    try:
+        if w.n!=1:raise ValueError('Frozen evaluation requires one simulator environment.')
+        for trial in range(n):
+            if stop and stop():raise InterruptedError('Evaluation stopped; no partial pass claimed.')
+            trial_started=time.perf_counter()
+            trial_seed=seed+trial*97
+            w.task_setting=task
+            w.fault_probability=float(fault_probability)
+            w.rng=np.random.default_rng(trial_seed)
+            if hasattr(w,'camera_rng'):
+                w.camera_rng=np.random.default_rng(trial_seed+7933)
+            w.reset()
+            rng=np.random.default_rng(trial_seed+10)
             for _ in range(220):
                 if stop and stop():raise InterruptedError('Evaluation stopped; no partial pass claimed.')
                 a=rng.uniform(-1,1,(1,5)) if random_policy else agent.act(w.observation(),deterministic=True)[0]
@@ -56,10 +69,10 @@ def evaluate(agent,task,n=20,seed=810017,random_policy=False,stop=None,fault_pro
                                     if np.asarray(value).ndim==1})
                     break
             else:raise RuntimeError('Unfinished evaluation trial')
-        finally:
-            if hasattr(w,'close'):w.close()
-        if on_timing:on_timing(task,random_policy,time.perf_counter()-trial_started,fault_probability)
-        if on_trial:on_trial(trial+1,n)
+            if on_timing:on_timing(task,random_policy,time.perf_counter()-trial_started,fault_probability)
+            if on_trial:on_trial(trial+1,n)
+    finally:
+        if owns_world and hasattr(w,'close'):w.close()
     assert signature==agent.signature(),'Evaluation altered neural weights'
     k=sum(int(r['success']) for r in records);faults=sum(int(r['fault']) for r in records)
     rate=k/n;z=1.96;den=1+z*z/n
@@ -443,24 +456,31 @@ class Runner:
             if not _inline:self.stop_event.clear()
             self.error='';self.evaluation_progress={'phase':'Starting','completed':0,'total':len(TASKS) if task=='all' else 1}
         def run():
+            shared_evaluation_world=None
             try:
                 seed=secrets.randbelow(2**30);rows=[];names=TASKS if task=='all' else (task,)
+                # One GL context for current/random/reference/fault, across tasks.
+                if self.is_camera:
+                    shared_evaluation_world=self.World(
+                        n=1,seed=seed,task=names[0],fault_probability=0.,
+                        **self.evaluation_options())
                 for index,name in enumerate(names):
                     for label in ('policy','random'):
                         with self.lock:self.evaluation_progress={'phase':name+' / '+label,'completed':index,'total':len(names)}
                         value=evaluate(current if label=='policy' else initial,name,trials,seed+index*1000,
-                                       random_policy=(label=='random'),stop=self.stop_event.is_set,world_factory=self.World,world_options=self.evaluation_options(),on_trial=self._eval_trial,on_timing=getattr(self,'record_trial_time',None))
+                                       random_policy=(label=='random'),stop=self.stop_event.is_set,world_factory=self.World,world_options=self.evaluation_options(),on_trial=self._eval_trial,on_timing=getattr(self,'record_trial_time',None),evaluation_world=shared_evaluation_world)
                         if label=='policy':now=value
                         else:baseline=value
                     with self.lock:self.evaluation_progress={'phase':name+' / before-training reference','completed':index,'total':len(names)}
                     earlier=evaluate(reference,name,trials,seed+index*1000,stop=self.stop_event.is_set,
                         world_factory=self.World,world_options=self.evaluation_options(),on_trial=self._eval_trial,
                         on_timing=(lambda t,r,s,f:self.record_trial_time(t,r,s,f,label='reference'))
-                            if hasattr(self,'record_trial_time') else None)
+                            if hasattr(self,'record_trial_time') else None,
+                         evaluation_world=shared_evaluation_world)
                     rows.append({'current':now,'random_actions':baseline,'reference':earlier,
                                  'learning_comparison':compare_scores(now,earlier,baseline,reference_kind)})
                 # Fault exercise stays separate from clean task scores.
-                faults=evaluate(current,'reach',max(5,trials//2),seed+9000,stop=self.stop_event.is_set,fault_probability=1.,world_factory=self.World,world_options=self.evaluation_options(),on_timing=getattr(self,'record_trial_time',None))
+                faults=evaluate(current,'reach',max(5,trials//2),seed+9000,stop=self.stop_event.is_set,fault_probability=1.,world_factory=self.World,world_options=self.evaluation_options(),on_timing=getattr(self,'record_trial_time',None),evaluation_world=shared_evaluation_world)
                 def combine(key):
                     vals=[r[key] for r in rows];n=sum(v['trials'] for v in vals);passed=sum(v['successes'] for v in vals)
                     return {'task':task,'trials':n,'successes':passed,'success_rate':passed/n,
@@ -496,8 +516,13 @@ class Runner:
                 except Exception as e:
                     with self.lock:self.status='error';self.error='Save failed: '+str(e)
             except Exception as e:
+                # Fail closed on interrupted RGB/GL evaluation; no fabricated scores.
                 with self.lock:self.status='error';self.error=str(e)
                 (self.folder/'last_error.txt').write_text(traceback.format_exc())
+            finally:
+                if shared_evaluation_world is not None:
+                    try:shared_evaluation_world.close()
+                    except Exception:pass  # Preserve the original error.
         if _inline:run()
         elif self.render_dispatch is not None:
             self.thread=self.render_dispatch.submit(run)
